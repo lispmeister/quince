@@ -13,7 +13,7 @@ export interface ConfigValidationError {
   message: string
 }
 
-const CONFIG_DIR = path.join(os.homedir(), '.pear-mail')
+const CONFIG_DIR = path.join(os.homedir(), '.quince')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
 
 export function getConfigDir(): string {

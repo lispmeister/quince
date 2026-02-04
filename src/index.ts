@@ -10,16 +10,16 @@ import { MessageQueue, type QueuedMessage } from './queue/index.js'
 const config = loadConfig()
 
 const PORT = parseInt(env.SMTP_PORT ?? String(config.smtpPort ?? 2525), 10)
-const HOSTNAME = env.HOSTNAME ?? 'pear-mail.local'
+const HOSTNAME = env.HOSTNAME ?? 'quince.local'
 const LOCAL_USER = env.LOCAL_USER ?? config.username ?? 'user'
 
 function printUsage(): void {
   const defaultRoom = config.defaultRoom
   console.log(`
-pear-mail - Decentralized SMTP over Pear network
+quince - Decentralized SMTP over Pear network
 
 Usage:
-  pear-mail <command> [options]
+  quince <command> [options]
 
 Commands:
   start [room-id]          Start daemon (uses default room if omitted)
@@ -32,7 +32,7 @@ Commands:
 
 Environment Variables:
   SMTP_PORT    SMTP server port (default: 2525)
-  HOSTNAME     Server hostname (default: pear-mail.local)
+  HOSTNAME     Server hostname (default: quince.local)
   LOCAL_USER   Local username (default: user)
 
 Config: ${getConfigPath()}
@@ -47,7 +47,7 @@ async function createRoom(): Promise<void> {
   console.log(roomId)
   console.log('')
   console.log('To set as default:')
-  console.log(`  pear-mail set-default ${roomId}`)
+  console.log(`  quince set-default ${roomId}`)
   await transport.destroy()
 }
 
@@ -116,7 +116,7 @@ async function startDaemon(roomId: string): Promise<void> {
 
   const normalizedRoomId = roomId.toLowerCase()
 
-  console.log('Starting pear-mail daemon...')
+  console.log('Starting quince daemon...')
   console.log(`  User: ${LOCAL_USER}`)
   console.log(`  Room: ${normalizedRoomId.slice(0, 8)}...`)
   console.log(`  SMTP: localhost:${PORT}`)
@@ -344,8 +344,8 @@ async function main(): Promise<void> {
         console.error('Error: No room-id provided and no default room configured')
         console.error('')
         console.error('Usage:')
-        console.error('  pear-mail start <room-id>')
-        console.error('  pear-mail set-default <room-id>  # then: pear-mail start')
+        console.error('  quince start <room-id>')
+        console.error('  quince set-default <room-id>  # then: quince start')
         process.exit(1)
       }
       await startDaemon(roomId)
@@ -359,7 +359,7 @@ async function main(): Promise<void> {
     case 'set-default':
       if (!args[1]) {
         console.error('Error: room-id is required')
-        console.error('Usage: pear-mail set-default <room-id>')
+        console.error('Usage: quince set-default <room-id>')
         process.exit(1)
       }
       await setDefaultRoom(args[1])
@@ -385,7 +385,7 @@ async function main(): Promise<void> {
 
     default:
       console.error(`Unknown command: ${command}`)
-      console.error('Run "pear-mail help" for usage.')
+      console.error('Run "quince help" for usage.')
       process.exit(1)
   }
 }

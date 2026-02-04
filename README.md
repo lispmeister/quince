@@ -1,4 +1,4 @@
-# pear-mail
+# quince
 
 > **WARNING: EXPERIMENTAL SOFTWARE**
 >
@@ -15,7 +15,7 @@ Decentralized SMTP MTA over the Pear P2P network.
 
 ## Overview
 
-pear-mail bridges traditional email clients (MUAs) to a P2P transport layer. Connect your mail client to localhost via SMTP, and messages are delivered over encrypted Pear network channels.
+quince bridges traditional email clients (MUAs) to a P2P transport layer. Connect your mail client to localhost via SMTP, and messages are delivered over encrypted Pear network channels.
 
 ## Installation
 
@@ -26,7 +26,7 @@ bun run build
 
 ## Configuration
 
-pear-mail stores configuration in `~/.pear-mail/config.json`. See `config.example.json` for the format.
+quince stores configuration in `~/.quince/config.json`. See `config.example.json` for the format.
 
 ### Setting up a room
 
@@ -81,7 +81,7 @@ Configure your MUA to use `localhost:2525` as the SMTP server, then send to `<us
 Environment variables override config file settings:
 
 - `SMTP_PORT` - SMTP server port (default: 2525)
-- `HOSTNAME` - Server hostname (default: pear-mail.local)
+- `HOSTNAME` - Server hostname (default: quince.local)
 - `LOCAL_USER` - Local username (default: user)
 
 ## License

@@ -1,10 +1,10 @@
-# pear-mail
+# quince
 
 Decentralized SMTP MTA over the Pear P2P network.
 
 ## Overview
 
-pear-mail is a daemon that bridges traditional email clients (MUAs) to a decentralized P2P transport layer. Users connect their mail client to localhost via standard SMTP, and pear-mail delivers messages to recipients over encrypted Pear network channels.
+quince is a daemon that bridges traditional email clients (MUAs) to a decentralized P2P transport layer. Users connect their mail client to localhost via standard SMTP, and quince delivers messages to recipients over encrypted Pear network channels.
 
 ## Problem Statement
 
@@ -13,13 +13,13 @@ Current email infrastructure is:
 - Lacks true end-to-end encryption
 - Has no native digital identity for users
 
-pear-mail addresses this by using Pear's Hyperswarm for peer discovery and encrypted transport, with cryptographic identities replacing DNS-based addressing.
+quince addresses this by using Pear's Hyperswarm for peer discovery and encrypted transport, with cryptographic identities replacing DNS-based addressing.
 
 ## Architecture
 
 ```
 ┌─────────┐    SMTP     ┌──────────────┐   Hyperswarm   ┌──────────────┐
-│   MUA   │ ──────────► │ pear-mail A  │ ◄────────────► │ pear-mail B  │ ──► file
+│   MUA   │ ──────────► │ quince A  │ ◄────────────► │ quince B  │ ──► file
 └─────────┘  localhost  └──────────────┘   (encrypted)  └──────────────┘
                               │
                          chat room ID
@@ -84,13 +84,13 @@ Standard MIME over the wire. Pear provides transport encryption; no additional m
 ### Storage Format (MVP)
 Received messages stored as individual files:
 ```
-~/.pear-mail/inbox/
+~/.quince/inbox/
   <timestamp>-<random>.eml
 ```
 
 ### Configuration
 ```
-~/.pear-mail/
+~/.quince/
   config.json     # daemon settings (username, smtp port, etc.)
   peers.json      # recipient → room-id mapping (for friendly aliases)
   inbox/          # received messages
@@ -171,7 +171,7 @@ peer.on('data', (data) => { /* store to file */ })
 - Address parsing (extract room ID from address)
 
 ### Integration Tests
-1. Start two pear-mail daemon instances
+1. Start two quince daemon instances
 2. Configure with shared chat room ID
 3. Connect mock MUA to daemon A
 4. Send SMTP message to recipient on daemon B

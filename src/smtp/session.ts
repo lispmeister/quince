@@ -18,7 +18,7 @@ export class SmtpSession {
   }
 
   getGreeting(): string {
-    return `220 ${this.config.hostname} ESMTP pear-mail\r\n`
+    return `220 ${this.config.hostname} ESMTP quince\r\n`
   }
 
   processLine(line: string): string {
