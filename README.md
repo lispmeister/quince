@@ -1,5 +1,16 @@
 # pear-mail
 
+> **WARNING: EXPERIMENTAL SOFTWARE**
+>
+> This is a proof-of-concept implementation. **Do not use for sensitive communications.**
+>
+> - The room ID is a shared secret. **Anyone with the room ID can join and read all messages.**
+> - There is no end-to-end encryption beyond the transport layer.
+> - There is no sender authentication or identity verification.
+> - Messages are not stored securely on disk.
+>
+> This software is provided for research and educational purposes only.
+
 Decentralized SMTP MTA over the Pear P2P network.
 
 ## Overview
