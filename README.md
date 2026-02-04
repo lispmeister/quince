@@ -13,21 +13,50 @@ bun install
 bun run build
 ```
 
-## Usage
+## Configuration
 
-### Create a shared room
+pear-mail stores configuration in `~/.pear-mail/config.json`. See `config.example.json` for the format.
+
+### Setting up a room
+
+A room is a shared secret (64-character hex string) that both parties use to find each other on the P2P network. To communicate, both parties must join the same room.
 
 ```bash
+# Create a new room
 ./node_modules/.bin/bare dist/index.js create-room
-# Output: <64-char-hex-room-id>
+
+# Set it as your default room
+./node_modules/.bin/bare dist/index.js set-default <room-id>
 ```
 
-Share this room ID with your correspondent out-of-band.
+Share the room ID with your correspondent through a secure channel (e.g., in-person, encrypted chat).
+
+### Config file options
+
+```json
+{
+  "defaultRoom": "<64-char-hex-room-id>",
+  "username": "alice",
+  "smtpPort": 2525
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `defaultRoom` | Room ID to join when starting without arguments |
+| `username` | Your local username (used in email addresses) |
+| `smtpPort` | Port for the local SMTP server |
+
+## Usage
 
 ### Start the daemon
 
 ```bash
-LOCAL_USER=alice SMTP_PORT=2525 ./node_modules/.bin/bare dist/index.js start <room-id>
+# With default room from config
+LOCAL_USER=alice ./node_modules/.bin/bare dist/index.js start
+
+# Or specify a room explicitly
+LOCAL_USER=alice ./node_modules/.bin/bare dist/index.js start <room-id>
 ```
 
 Your email address will be: `alice@<room-id>`
@@ -37,6 +66,8 @@ Your email address will be: `alice@<room-id>`
 Configure your MUA to use `localhost:2525` as the SMTP server, then send to `<user>@<room-id>`.
 
 ## Environment Variables
+
+Environment variables override config file settings:
 
 - `SMTP_PORT` - SMTP server port (default: 2525)
 - `HOSTNAME` - Server hostname (default: pear-mail.local)

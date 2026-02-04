@@ -4,12 +4,16 @@ import { SmtpServer } from './smtp/index.js'
 import { Transport } from './transport/index.js'
 import { parseAddress } from './smtp/parser.js'
 import { generateId, encodeBase64, decodeBase64 } from './utils.js'
+import { loadConfig, saveConfig } from './config.js'
 
-const PORT = parseInt(env.SMTP_PORT ?? '2525', 10)
+const config = loadConfig()
+
+const PORT = parseInt(env.SMTP_PORT ?? String(config.smtpPort ?? 2525), 10)
 const HOSTNAME = env.HOSTNAME ?? 'pear-mail.local'
-const LOCAL_USER = env.LOCAL_USER ?? 'user'
+const LOCAL_USER = env.LOCAL_USER ?? config.username ?? 'user'
 
 function printUsage(): void {
+  const defaultRoom = config.defaultRoom
   console.log(`
 pear-mail - Decentralized SMTP over Pear network
 
@@ -17,20 +21,25 @@ Usage:
   bare dist/index.js [command] [options]
 
 Commands:
-  create-room          Create a new room and print the room ID
-  start <room-id>      Start daemon and join the specified room
+  create-room              Create a new room and print the room ID
+  start [room-id]          Start daemon (uses default room from config if omitted)
+  set-default <room-id>    Set the default room ID in config
 
 Environment Variables:
   SMTP_PORT           SMTP server port (default: 2525)
   HOSTNAME            Server hostname (default: pear-mail.local)
   LOCAL_USER          Local username for receiving mail (default: user)
 
-Examples:
-  # Create a new room
-  bare dist/index.js create-room
+Config file: ~/.pear-mail/config.json
+${defaultRoom ? `Default room: ${defaultRoom.slice(0, 8)}...` : 'No default room configured'}
 
-  # Start daemon with a room
-  LOCAL_USER=alice bare dist/index.js start abc123...
+Examples:
+  # Create a new room and set as default
+  bare dist/index.js create-room
+  bare dist/index.js set-default <room-id>
+
+  # Start daemon with default room
+  LOCAL_USER=alice bare dist/index.js start
 `)
 }
 
@@ -143,6 +152,16 @@ async function startDaemon(roomId: string): Promise<void> {
   console.log('Waiting for peer connections...\n')
 }
 
+async function setDefaultRoom(roomId: string): Promise<void> {
+  if (!/^[a-f0-9]{64}$/i.test(roomId)) {
+    console.error('Error: Invalid room ID format (expected 64 hex characters)')
+    process.exit(1)
+  }
+  config.defaultRoom = roomId.toLowerCase()
+  saveConfig(config)
+  console.log(`Default room set to: ${roomId}`)
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2) // Skip 'bare' and script path
 
@@ -158,13 +177,25 @@ async function main(): Promise<void> {
       await createRoom()
       break
 
-    case 'start':
-      if (!args[1]) {
-        console.error('Error: room-id is required')
+    case 'start': {
+      const roomId = args[1] ?? config.defaultRoom
+      if (!roomId) {
+        console.error('Error: No room-id provided and no default room configured')
         console.error('Usage: bare dist/index.js start <room-id>')
+        console.error('   or: bare dist/index.js set-default <room-id>')
         process.exit(1)
       }
-      await startDaemon(args[1])
+      await startDaemon(roomId)
+      break
+    }
+
+    case 'set-default':
+      if (!args[1]) {
+        console.error('Error: room-id is required')
+        console.error('Usage: bare dist/index.js set-default <room-id>')
+        process.exit(1)
+      }
+      await setDefaultRoom(args[1])
       break
 
     case 'help':

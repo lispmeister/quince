@@ -1,3 +1,23 @@
+declare module 'bare-fs' {
+  export function readFileSync(path: string, encoding?: string): string | Buffer
+  export function writeFileSync(path: string, data: string | Buffer): void
+  export function existsSync(path: string): boolean
+  export function mkdirSync(path: string, options?: { recursive?: boolean }): void
+}
+
+declare module 'bare-path' {
+  export function join(...paths: string[]): string
+  export function resolve(...paths: string[]): string
+  export function dirname(path: string): string
+  export function basename(path: string): string
+}
+
+declare module 'bare-os' {
+  export function homedir(): string
+  export function platform(): string
+  export function hostname(): string
+}
+
 declare module 'bare-events' {
   export class EventEmitter {
     on(event: string | symbol, listener: (...args: any[]) => void): this
