@@ -1,0 +1,28 @@
+{
+  "name": "pear-mail",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "./node_modules/.bin/bare dist/index.js",
+    "dev": "bun run build && bun run start",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^20",
+    "bare": "^1.26.0",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "b4a": "^1.7.3",
+    "bare-env": "^3.0.0",
+    "bare-events": "^2.8.2",
+    "bare-process": "^4.2.2",
+    "bare-tcp": "^2.2.2",
+    "hypercore-crypto": "^3.6.1",
+    "hyperswarm": "^4.16.0"
+  }
+}
