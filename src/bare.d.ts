@@ -3,6 +3,8 @@ declare module 'bare-fs' {
   export function writeFileSync(path: string, data: string | Buffer): void
   export function existsSync(path: string): boolean
   export function mkdirSync(path: string, options?: { recursive?: boolean }): void
+  export function readdirSync(path: string): string[]
+  export function unlinkSync(path: string): void
 }
 
 declare module 'bare-path' {

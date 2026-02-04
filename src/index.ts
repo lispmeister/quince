@@ -5,6 +5,7 @@ import { Transport } from './transport/index.js'
 import { parseAddress } from './smtp/parser.js'
 import { generateId, encodeBase64, decodeBase64 } from './utils.js'
 import { loadConfig, saveConfig } from './config.js'
+import { MessageQueue, type QueuedMessage } from './queue/index.js'
 
 const config = loadConfig()
 
@@ -57,9 +58,54 @@ async function startDaemon(roomId: string): Promise<void> {
   console.log(`Room: ${roomId.slice(0, 8)}...`)
 
   const transport = new Transport()
+  const queue = new MessageQueue()
 
   // Join the room
   const room = await transport.joinRoom(roomId)
+
+  // Helper to attempt sending a message (used for both new and queued messages)
+  async function trySendMessage(
+    id: string,
+    from: string,
+    to: string,
+    targetRoomId: string,
+    encoded: string
+  ): Promise<boolean> {
+    const targetRoom = transport.getRoom(targetRoomId)
+
+    if (!targetRoom || !targetRoom.isConnected) {
+      console.log(`Room ${targetRoomId.slice(0, 8)}... not connected, cannot deliver`)
+      return false
+    }
+
+    console.log(`Sending message ${id} to room ${targetRoomId.slice(0, 8)}...`)
+
+    try {
+      await targetRoom.sendMessage(id, encoded)
+      console.log(`Message ${id} delivered and acknowledged`)
+      return true
+    } catch (err) {
+      console.error(`Failed to deliver message ${id}:`, err)
+      return false
+    }
+  }
+
+  // Handle queued message retry
+  queue.on('message-due', async (msg: QueuedMessage) => {
+    console.log(`\n--- Retrying queued message ${msg.id} (attempt #${msg.retryCount + 1}) ---`)
+
+    const success = await trySendMessage(msg.id, msg.from, msg.to, msg.roomId, msg.mime)
+
+    if (success) {
+      queue.remove(msg.id)
+    } else {
+      queue.markRetry(msg.id)
+    }
+  })
+
+  queue.on('message-expired', (msg: QueuedMessage) => {
+    console.error(`Message ${msg.id} expired after ${msg.retryCount} retries`)
+  })
 
   // Handle incoming messages from peers
   transport.on('message', async (incomingRoomId, msg) => {
@@ -83,6 +129,12 @@ async function startDaemon(roomId: string): Promise<void> {
 
   transport.on('room-connected', (connectedRoomId) => {
     console.log(`Room ${connectedRoomId.slice(0, 8)}... connected`)
+    // Trigger retry for any queued messages to this room
+    const pending = queue.getByRoomId(connectedRoomId)
+    if (pending.length > 0) {
+      console.log(`Triggering retry for ${pending.length} queued message(s)`)
+      queue.triggerRetryForRoom(connectedRoomId)
+    }
   })
 
   transport.on('room-disconnected', (disconnectedRoomId) => {
@@ -102,29 +154,22 @@ async function startDaemon(roomId: string): Promise<void> {
       return
     }
 
-    const targetRoom = transport.getRoom(parsed.roomId)
-    if (!targetRoom) {
-      console.error(`Not connected to room ${parsed.roomId.slice(0, 8)}...`)
-      return
-    }
-
-    if (!targetRoom.isConnected) {
-      console.error(`No peers in room ${parsed.roomId.slice(0, 8)}...`)
-      return
-    }
-
     // Build full email with headers
     const fullMessage = `From: ${from}\r\nTo: ${to}\r\n${data}`
     const messageId = generateId()
     const encoded = encodeBase64(fullMessage)
 
-    console.log(`Sending message ${messageId} to room ${parsed.roomId.slice(0, 8)}...`)
+    const success = await trySendMessage(messageId, from, to, parsed.roomId, encoded)
 
-    try {
-      await targetRoom.sendMessage(messageId, encoded)
-      console.log(`Message ${messageId} delivered and acknowledged`)
-    } catch (err) {
-      console.error(`Failed to deliver message:`, err)
+    if (!success) {
+      // Queue for retry
+      queue.add({
+        id: messageId,
+        from,
+        to,
+        roomId: parsed.roomId,
+        mime: encoded
+      })
     }
   }
 
@@ -140,6 +185,7 @@ async function startDaemon(roomId: string): Promise<void> {
   // Handle shutdown
   const shutdown = async () => {
     console.log('\nShutting down...')
+    queue.destroy()
     await smtpServer.stop()
     await transport.destroy()
     process.exit(0)
@@ -148,7 +194,11 @@ async function startDaemon(roomId: string): Promise<void> {
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 
+  const queueSize = queue.size()
   console.log(`\nYour email address: ${LOCAL_USER}@${roomId}`)
+  if (queueSize > 0) {
+    console.log(`Queued messages pending delivery: ${queueSize}`)
+  }
   console.log('Waiting for peer connections...\n')
 }
 
