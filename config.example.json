@@ -1,8 +1,8 @@
 {
-  "username": "<your-username>",
-  "smtpPort": "<smtp-port>",
-  "pop3Port": "<pop3-port>",
+  "username": "alice",
+  "smtpPort": 2525,
+  "pop3Port": 1110,
   "peers": {
-    "<peer-alias>": "<peer-public-key>"
+    "bob": "b0b5pubkey1234567890abcdef1234567890abcdef1234567890abcdef1234"
   }
 }
