@@ -102,11 +102,11 @@ export class SmtpSession {
     // Parse and validate the address format
     const parsed = parseAddress(to)
     if (!parsed) {
-      return '550 Invalid address format (expected user@<64-char-hex>)\r\n'
+      return '550 Invalid address format (expected user@<subdomain>.quincemail.com)\r\n'
     }
 
-    // For outbound mail, we accept any valid recipient address
-    // The room ID in the address determines where to route the message
+    // For outbound mail, we accept any valid quincemail.com address
+    // The pubkey/alias in the subdomain determines where to route the message
 
     this.transaction.to = to
     this.state = 'RCPT'

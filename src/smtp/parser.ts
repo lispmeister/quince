@@ -27,17 +27,22 @@ export function parseRcptTo(arg: string): string | null {
   return match ? match[1]! : null
 }
 
-export function parseAddress(address: string): { user: string; roomId: string } | null {
-  // Format: user@<64-char-hex-room-id>
+export function parseAddress(address: string): { user: string; domain: string } | null {
+  // Format: user@<subdomain>.quincemail.com or user@<pubkey>.quincemail.com
   const atIndex = address.lastIndexOf('@')
   if (atIndex === -1) return null
 
   const user = address.slice(0, atIndex)
-  const roomId = address.slice(atIndex + 1)
+  const domain = address.slice(atIndex + 1)
 
-  // Room ID should be 64 hex characters (32 bytes)
-  if (!/^[a-f0-9]{64}$/i.test(roomId)) return null
   if (!user) return null
+  if (!domain) return null
 
-  return { user, roomId: roomId.toLowerCase() }
+  // Accept any quincemail.com subdomain (pubkey or alias)
+  // Detailed validation happens later in resolveRecipient()
+  if (!/^[a-z0-9._-]+\.quincemail\.com$/i.test(domain)) {
+    return null
+  }
+
+  return { user, domain: domain.toLowerCase() }
 }

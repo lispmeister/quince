@@ -2,10 +2,10 @@ export interface QueuedMessage {
   id: string
   from: string
   to: string
-  roomId: string
-  mime: string           // base64 encoded
-  createdAt: number      // timestamp ms
-  nextRetryAt: number    // timestamp ms
+  recipientPubkey: string  // 64 hex chars
+  mime: string             // base64 encoded
+  createdAt: number        // timestamp ms
+  nextRetryAt: number      // timestamp ms
   retryCount: number
 }
 

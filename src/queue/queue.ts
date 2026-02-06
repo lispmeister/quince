@@ -108,8 +108,8 @@ export class MessageQueue extends EventEmitter {
     return this.messages.get(id)
   }
 
-  getByRoomId(roomId: string): QueuedMessage[] {
-    return Array.from(this.messages.values()).filter(m => m.roomId === roomId)
+  getByRecipient(pubkey: string): QueuedMessage[] {
+    return Array.from(this.messages.values()).filter(m => m.recipientPubkey === pubkey)
   }
 
   getAll(): QueuedMessage[] {
@@ -182,9 +182,9 @@ export class MessageQueue extends EventEmitter {
     }, delay)
   }
 
-  // Call this when a room connects to immediately retry pending messages
-  triggerRetryForRoom(roomId: string): void {
-    const messages = this.getByRoomId(roomId)
+  // Call this when a peer connects to immediately retry pending messages
+  triggerRetryForRecipient(pubkey: string): void {
+    const messages = this.getByRecipient(pubkey)
     for (const msg of messages) {
       this.emit('message-due', msg)
     }

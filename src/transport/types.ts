@@ -1,7 +1,13 @@
+export interface PeerIdentify {
+  type: 'IDENTIFY'
+  publicKey: string  // sender's identity pubkey (64 hex chars)
+}
+
 export interface PeerMessage {
   type: 'MESSAGE'
   id: string
-  mime: string  // base64 encoded
+  from: string    // sender's public key (64 hex chars)
+  mime: string    // base64 encoded
 }
 
 export interface PeerAck {
@@ -9,9 +15,9 @@ export interface PeerAck {
   id: string
 }
 
-export type PeerPacket = PeerMessage | PeerAck
+export type PeerPacket = PeerIdentify | PeerMessage | PeerAck
 
-export interface RoomConfig {
-  id: string       // 64-char hex
-  alias?: string   // friendly name
+export interface PeerConfig {
+  publicKey: string  // 64-char hex
+  alias?: string     // friendly name
 }

@@ -2,19 +2,37 @@ import process from 'bare-process'
 import env from 'bare-env'
 import { SmtpServer } from './smtp/index.js'
 import { Transport } from './transport/index.js'
-import { parseAddress } from './smtp/parser.js'
+import type { PeerMessage } from './transport/index.js'
 import { generateId, encodeBase64, decodeBase64 } from './utils.js'
-import { loadConfig, saveConfig, getConfigPath, validateRoomId } from './config.js'
+import {
+  loadConfig,
+  saveConfig,
+  getConfigPath,
+  addPeer,
+  removePeer,
+  getPeerPubkey,
+  getPeerAlias,
+  validateAlias
+} from './config.js'
 import { MessageQueue, type QueuedMessage } from './queue/index.js'
+import {
+  loadIdentity,
+  getIdentityPath,
+  getEmailAddress,
+  parseEmailDomain,
+  validatePublicKey,
+  EMAIL_DOMAIN
+} from './identity.js'
 
-const config = loadConfig()
+let config = loadConfig()
+const identity = loadIdentity()
 
 const PORT = parseInt(env.SMTP_PORT ?? String(config.smtpPort ?? 2525), 10)
 const HOSTNAME = env.HOSTNAME ?? 'quince.local'
 const LOCAL_USER = env.LOCAL_USER ?? config.username ?? 'user'
 
 function printUsage(): void {
-  const defaultRoom = config.defaultRoom
+  const emailAddr = getEmailAddress(LOCAL_USER, identity.publicKey)
   console.log(`
 quince - Decentralized SMTP over Pear network
 
@@ -22,46 +40,118 @@ Usage:
   quince <command> [options]
 
 Commands:
-  start [room-id]          Start daemon (uses default room if omitted)
-  create-room              Create a new room and print the room ID
-  set-default <room-id>    Set the default room ID
-  config                   Show current configuration
-  queue                    Show queued messages
-  queue clear              Clear all queued messages
-  help                     Show this help message
+  start                         Start the daemon
+  identity                      Show your identity and email address
+  peers                         List configured peers
+  add-peer <alias> <pubkey>     Add a peer with friendly alias
+  remove-peer <alias>           Remove a peer
+  config                        Show current configuration
+  queue                         Show queued messages
+  queue clear                   Clear all queued messages
+  help                          Show this help message
 
 Environment Variables:
   SMTP_PORT    SMTP server port (default: 2525)
   HOSTNAME     Server hostname (default: quince.local)
   LOCAL_USER   Local username (default: user)
 
+Your email: ${emailAddr}
 Config: ${getConfigPath()}
-${defaultRoom ? `Default room: ${defaultRoom.slice(0, 8)}...` : 'No default room configured'}
 `)
 }
 
-async function createRoom(): Promise<void> {
-  const transport = new Transport()
-  const roomId = transport.createRoom()
-  console.log('Created new room:')
-  console.log(roomId)
+async function showIdentity(): Promise<void> {
+  const emailAddr = getEmailAddress(LOCAL_USER, identity.publicKey)
+  console.log('Your quince identity:')
   console.log('')
-  console.log('To set as default:')
-  console.log(`  quince set-default ${roomId}`)
-  await transport.destroy()
+  console.log(`  Email address: ${emailAddr}`)
+  console.log('')
+  console.log(`  Public key: ${identity.publicKey}`)
+  console.log(`  Identity file: ${getIdentityPath()}`)
+  console.log('')
+  console.log('Share your email address with correspondents.')
+  console.log(`They can send mail to: ${emailAddr}`)
+}
+
+async function showPeers(): Promise<void> {
+  const peers = config.peers ?? {}
+  const peerCount = Object.keys(peers).length
+
+  if (peerCount === 0) {
+    console.log('No peers configured.')
+    console.log('')
+    console.log('Add a peer with:')
+    console.log('  quince add-peer <alias> <pubkey>')
+    return
+  }
+
+  console.log(`Configured peers: ${peerCount}`)
+  console.log('')
+
+  for (const [alias, pubkey] of Object.entries(peers)) {
+    console.log(`  ${alias}`)
+    console.log(`    Pubkey: ${pubkey}`)
+    console.log(`    Email:  <user>@${alias}.${EMAIL_DOMAIN}`)
+    console.log('')
+  }
+}
+
+async function handleAddPeer(alias: string, pubkey: string): Promise<void> {
+  // Validate alias
+  const aliasError = validateAlias(alias)
+  if (aliasError) {
+    console.error(`Error: ${aliasError}`)
+    process.exit(1)
+  }
+
+  // Validate pubkey
+  const pubkeyError = validatePublicKey(pubkey)
+  if (pubkeyError) {
+    console.error(`Error: ${pubkeyError}`)
+    process.exit(1)
+  }
+
+  // Check if alias already exists
+  if (getPeerPubkey(config, alias)) {
+    console.error(`Error: Peer '${alias}' already exists`)
+    console.error('Use "quince remove-peer" first to update it')
+    process.exit(1)
+  }
+
+  config = addPeer(config, alias, pubkey)
+  saveConfig(config)
+
+  console.log(`Added peer '${alias}'`)
+  console.log(`  Pubkey: ${pubkey.toLowerCase()}`)
+  console.log(`  Email:  <user>@${alias}.${EMAIL_DOMAIN}`)
+}
+
+async function handleRemovePeer(alias: string): Promise<void> {
+  if (!getPeerPubkey(config, alias)) {
+    console.error(`Error: Peer '${alias}' not found`)
+    process.exit(1)
+  }
+
+  config = removePeer(config, alias)
+  saveConfig(config)
+
+  console.log(`Removed peer '${alias}'`)
 }
 
 async function showConfig(): Promise<void> {
+  const peerCount = Object.keys(config.peers ?? {}).length
   console.log('Current configuration:')
   console.log(`  Config file: ${getConfigPath()}`)
-  console.log(`  Default room: ${config.defaultRoom ?? '(not set)'}`)
+  console.log(`  Identity file: ${getIdentityPath()}`)
   console.log(`  Username: ${config.username ?? '(not set, using env or default)'}`)
   console.log(`  SMTP port: ${config.smtpPort ?? '(not set, using env or default)'}`)
+  console.log(`  Peers: ${peerCount}`)
   console.log('')
   console.log('Effective settings:')
   console.log(`  LOCAL_USER: ${LOCAL_USER}`)
   console.log(`  SMTP_PORT: ${PORT}`)
   console.log(`  HOSTNAME: ${HOSTNAME}`)
+  console.log(`  Public key: ${identity.publicKey.slice(0, 16)}...`)
 }
 
 async function showQueue(): Promise<void> {
@@ -79,8 +169,10 @@ async function showQueue(): Promise<void> {
   for (const msg of messages) {
     const age = Math.round((Date.now() - msg.createdAt) / 1000)
     const nextRetry = Math.max(0, Math.round((msg.nextRetryAt - Date.now()) / 1000))
+    const alias = getPeerAlias(config, msg.recipientPubkey)
     console.log(`  ${msg.id}`)
     console.log(`    To: ${msg.to}`)
+    console.log(`    Peer: ${alias ?? msg.recipientPubkey.slice(0, 16) + '...'}`)
     console.log(`    Age: ${age}s, Retries: ${msg.retryCount}, Next retry: ${nextRetry}s`)
     console.log('')
   }
@@ -106,31 +198,65 @@ async function clearQueue(): Promise<void> {
   queue.destroy()
 }
 
-async function startDaemon(roomId: string): Promise<void> {
-  // Validate room ID
-  const roomError = validateRoomId(roomId)
-  if (roomError) {
-    console.error(`Error: ${roomError}`)
-    process.exit(1)
+// Resolve recipient address to pubkey
+function resolveRecipient(to: string): { pubkey: string; display: string } | null {
+  const parsed = parseEmailDomain(to)
+  if (!parsed) {
+    console.error(`Invalid recipient address format: ${to}`)
+    console.error(`Expected: user@<pubkey>.${EMAIL_DOMAIN} or user@<alias>.${EMAIL_DOMAIN}`)
+    return null
   }
 
-  const normalizedRoomId = roomId.toLowerCase()
+  // Direct pubkey in address
+  if (parsed.publicKey) {
+    const alias = getPeerAlias(config, parsed.publicKey)
+    return {
+      pubkey: parsed.publicKey,
+      display: alias ?? parsed.publicKey.slice(0, 16) + '...'
+    }
+  }
+
+  // Alias lookup
+  if (parsed.alias) {
+    const pubkey = getPeerPubkey(config, parsed.alias)
+    if (!pubkey) {
+      console.error(`Unknown peer alias: ${parsed.alias}`)
+      console.error('Add peer with: quince add-peer <alias> <pubkey>')
+      return null
+    }
+    return {
+      pubkey,
+      display: parsed.alias
+    }
+  }
+
+  return null
+}
+
+async function startDaemon(): Promise<void> {
+  const emailAddr = getEmailAddress(LOCAL_USER, identity.publicKey)
+  const peers = config.peers ?? {}
+  const peerCount = Object.keys(peers).length
+
+  // Build whitelist from configured peers
+  const whitelist = new Set(Object.values(peers).map(pk => pk.toLowerCase()))
 
   console.log('Starting quince daemon...')
   console.log(`  User: ${LOCAL_USER}`)
-  console.log(`  Room: ${normalizedRoomId.slice(0, 8)}...`)
+  console.log(`  Email: ${emailAddr}`)
   console.log(`  SMTP: localhost:${PORT}`)
+  console.log(`  Peers: ${peerCount} (whitelist mode)`)
 
-  const transport = new Transport()
+  const transport = new Transport(identity, { whitelist })
   const queue = new MessageQueue()
 
   let isShuttingDown = false
 
-  // Join the room
+  // Start the swarm
   try {
-    await transport.joinRoom(normalizedRoomId)
+    await transport.start()
   } catch (err) {
-    console.error('Failed to join room:', err)
+    console.error('Failed to start transport:', err)
     await transport.destroy()
     process.exit(1)
   }
@@ -138,24 +264,32 @@ async function startDaemon(roomId: string): Promise<void> {
   // Helper to attempt sending a message
   async function trySendMessage(
     id: string,
-    from: string,
-    to: string,
-    targetRoomId: string,
+    recipientPubkey: string,
+    display: string,
     encoded: string
   ): Promise<boolean> {
     if (isShuttingDown) return false
 
-    const targetRoom = transport.getRoom(targetRoomId)
+    if (!transport.isPeerConnected(recipientPubkey)) {
+      console.log(`Peer ${display} not connected, attempting discovery...`)
+      try {
+        await transport.connectToPeer(recipientPubkey)
+        // Give it a moment to establish connection
+        await new Promise(resolve => setTimeout(resolve, 2000))
+      } catch (err) {
+        console.log(`Discovery failed for ${display}`)
+      }
+    }
 
-    if (!targetRoom || !targetRoom.isConnected) {
-      console.log(`Room ${targetRoomId.slice(0, 8)}... not connected`)
+    if (!transport.isPeerConnected(recipientPubkey)) {
+      console.log(`Peer ${display} still not connected`)
       return false
     }
 
-    console.log(`Sending message ${id.slice(0, 8)}...`)
+    console.log(`Sending message ${id.slice(0, 8)}... to ${display}`)
 
     try {
-      await targetRoom.sendMessage(id, encoded)
+      await transport.sendMessage(recipientPubkey, id, encoded)
       console.log(`Message ${id.slice(0, 8)}... delivered`)
       return true
     } catch (err) {
@@ -169,9 +303,12 @@ async function startDaemon(roomId: string): Promise<void> {
   queue.on('message-due', async (msg: QueuedMessage) => {
     if (isShuttingDown) return
 
+    const alias = getPeerAlias(config, msg.recipientPubkey)
+    const display = alias ?? msg.recipientPubkey.slice(0, 16) + '...'
+
     console.log(`Retrying ${msg.id.slice(0, 8)}... (attempt ${msg.retryCount + 1})`)
 
-    const success = await trySendMessage(msg.id, msg.from, msg.to, msg.roomId, msg.mime)
+    const success = await trySendMessage(msg.id, msg.recipientPubkey, display, msg.mime)
 
     if (success) {
       queue.remove(msg.id)
@@ -185,38 +322,47 @@ async function startDaemon(roomId: string): Promise<void> {
   })
 
   // Handle incoming messages from peers
-  transport.on('message', async (incomingRoomId, msg) => {
+  transport.on('message', async (msg: PeerMessage, senderPubkey: string) => {
+    const alias = getPeerAlias(config, senderPubkey)
+    const display = alias ?? senderPubkey.slice(0, 16) + '...'
+
     console.log('')
-    console.log(`--- Incoming message ---`)
+    console.log(`--- Incoming message from ${display} ---`)
 
     try {
       const mime = decodeBase64(msg.mime)
       console.log(mime)
       console.log('------------------------')
 
-      // Send ACK
-      const incomingRoom = transport.getRoom(incomingRoomId)
-      if (incomingRoom) {
-        incomingRoom.sendAck(msg.id)
-      }
+      // Send ACK back to sender
+      transport.sendAck(senderPubkey, msg.id)
     } catch (err) {
       console.error('Failed to process message:', err)
     }
   })
 
-  transport.on('room-connected', (connectedRoomId) => {
-    console.log(`Peer connected (room ${connectedRoomId.slice(0, 8)}...)`)
+  transport.on('peer-connected', (pubkey: string) => {
+    const alias = getPeerAlias(config, pubkey)
+    const display = alias ?? pubkey.slice(0, 16) + '...'
+    console.log(`Peer connected: ${display}`)
 
-    // Retry queued messages
-    const pending = queue.getByRoomId(connectedRoomId)
+    // Retry queued messages for this peer
+    const pending = queue.getByRecipient(pubkey)
     if (pending.length > 0) {
-      console.log(`Retrying ${pending.length} queued message(s)...`)
-      queue.triggerRetryForRoom(connectedRoomId)
+      console.log(`Retrying ${pending.length} queued message(s) for ${display}...`)
+      queue.triggerRetryForRecipient(pubkey)
     }
   })
 
-  transport.on('room-disconnected', (disconnectedRoomId) => {
-    console.log(`Peer disconnected (room ${disconnectedRoomId.slice(0, 8)}...)`)
+  transport.on('peer-disconnected', (pubkey: string) => {
+    const alias = getPeerAlias(config, pubkey)
+    const display = alias ?? pubkey.slice(0, 16) + '...'
+    console.log(`Peer disconnected: ${display}`)
+  })
+
+  transport.on('peer-rejected', (pubkey: string) => {
+    console.log(`Message rejected from unknown sender: ${pubkey.slice(0, 16)}...`)
+    console.log(`  To allow messages from this sender, run: quince add-peer <alias> ${pubkey}`)
   })
 
   // SMTP message handler
@@ -226,9 +372,8 @@ async function startDaemon(roomId: string): Promise<void> {
     console.log(`From: ${from}`)
     console.log(`To: ${to}`)
 
-    const parsed = parseAddress(to)
-    if (!parsed) {
-      console.error('Invalid recipient address')
+    const recipient = resolveRecipient(to)
+    if (!recipient) {
       return
     }
 
@@ -236,14 +381,14 @@ async function startDaemon(roomId: string): Promise<void> {
     const messageId = generateId()
     const encoded = encodeBase64(fullMessage)
 
-    const success = await trySendMessage(messageId, from, to, parsed.roomId, encoded)
+    const success = await trySendMessage(messageId, recipient.pubkey, recipient.display, encoded)
 
     if (!success) {
       queue.add({
         id: messageId,
         from,
         to,
-        roomId: parsed.roomId,
+        recipientPubkey: recipient.pubkey,
         mime: encoded
       })
       console.log(`Queued for retry`)
@@ -306,25 +451,13 @@ async function startDaemon(roomId: string): Promise<void> {
 
   // Ready message
   console.log('')
-  console.log(`Email address: ${LOCAL_USER}@${normalizedRoomId}`)
+  console.log(`Public key: ${identity.publicKey.slice(0, 16)}...`)
   const queueSize = queue.size()
   if (queueSize > 0) {
     console.log(`Queued messages: ${queueSize}`)
   }
   console.log('Ready. Waiting for connections...')
   console.log('')
-}
-
-async function setDefaultRoom(roomId: string): Promise<void> {
-  const error = validateRoomId(roomId)
-  if (error) {
-    console.error(`Error: ${error}`)
-    process.exit(1)
-  }
-
-  config.defaultRoom = roomId.toLowerCase()
-  saveConfig(config)
-  console.log(`Default room set to: ${roomId}`)
 }
 
 async function main(): Promise<void> {
@@ -338,31 +471,32 @@ async function main(): Promise<void> {
   const command = args[0]
 
   switch (command) {
-    case 'start': {
-      const roomId = args[1] ?? config.defaultRoom
-      if (!roomId) {
-        console.error('Error: No room-id provided and no default room configured')
-        console.error('')
-        console.error('Usage:')
-        console.error('  quince start <room-id>')
-        console.error('  quince set-default <room-id>  # then: quince start')
+    case 'start':
+      await startDaemon()
+      break
+
+    case 'identity':
+      await showIdentity()
+      break
+
+    case 'peers':
+      await showPeers()
+      break
+
+    case 'add-peer':
+      if (!args[1] || !args[2]) {
+        console.error('Usage: quince add-peer <alias> <pubkey>')
         process.exit(1)
       }
-      await startDaemon(roomId)
-      break
-    }
-
-    case 'create-room':
-      await createRoom()
+      await handleAddPeer(args[1], args[2])
       break
 
-    case 'set-default':
+    case 'remove-peer':
       if (!args[1]) {
-        console.error('Error: room-id is required')
-        console.error('Usage: quince set-default <room-id>')
+        console.error('Usage: quince remove-peer <alias>')
         process.exit(1)
       }
-      await setDefaultRoom(args[1])
+      await handleRemovePeer(args[1])
       break
 
     case 'config':

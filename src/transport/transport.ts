@@ -1,50 +1,51 @@
 import { EventEmitter } from 'bare-events'
 import Hyperswarm, { type Peer, type PeerInfo, type Discovery } from 'hyperswarm'
-import crypto from 'hypercore-crypto'
 import b4a from 'b4a'
-import { Room } from './room.js'
-import type { PeerMessage } from './types.js'
+import type { PeerPacket, PeerMessage, PeerAck, PeerIdentify } from './types.js'
+import type { Identity } from '../identity.js'
+
+export interface TransportConfig {
+  whitelist?: Set<string>  // allowed peer pubkeys (lowercase)
+}
 
 export interface TransportEvents {
-  'message': (roomId: string, msg: PeerMessage) => void
-  'room-connected': (roomId: string) => void
-  'room-disconnected': (roomId: string) => void
+  'message': (msg: PeerMessage, senderPubkey: string) => void
+  'peer-connected': (pubkey: string) => void
+  'peer-disconnected': (pubkey: string) => void
+  'peer-rejected': (pubkey: string) => void  // not on whitelist
+}
+
+interface PendingAck {
+  resolve: () => void
+  reject: (err: Error) => void
+  timeout: ReturnType<typeof setTimeout>
+}
+
+interface PeerConnection {
+  peer: Peer
+  identityPubkey: string | null  // null until IDENTIFY received
+  buffer: string
 }
 
 export class Transport extends EventEmitter {
   private swarm: Hyperswarm
-  private rooms: Map<string, Room> = new Map()
-  private discoveries: Map<string, Discovery> = new Map()
+  private identity: Identity
+  private config: TransportConfig
+  private topic: Buffer
+  private discovery: Discovery | null = null
+  private connections: Map<Peer, PeerConnection> = new Map()  // raw connections
+  private peersByIdentity: Map<string, Peer> = new Map()      // identity pubkey -> peer
+  private pendingAcks: Map<string, PendingAck> = new Map()
 
-  constructor() {
+  constructor(identity: Identity, config: TransportConfig = {}) {
     super()
+    this.identity = identity
+    this.config = config
+    this.topic = b4a.from(identity.publicKey, 'hex')
     this.swarm = new Hyperswarm()
 
     this.swarm.on('connection', (peer: Peer, info: PeerInfo) => {
-      console.log(`New peer connection, topics: ${info.topics.length}`)
-
-      // Try to find room from topics array
-      let room: Room | undefined
-
-      for (const topic of info.topics) {
-        const topicHex = b4a.toString(topic, 'hex')
-        room = this.rooms.get(topicHex)
-        if (room) break
-      }
-
-      // Fallback for server-mode connections (topics array is empty)
-      // Assign to first joined room for MVP
-      if (!room && this.rooms.size > 0) {
-        room = this.rooms.values().next().value
-      }
-
-      if (room) {
-        console.log(`Peer connected to room ${room.id.slice(0, 8)}...`)
-        room.addPeer(peer)
-      } else {
-        console.log('Peer connected but no room to assign')
-        peer.end()
-      }
+      this.handleConnection(peer, info)
     })
 
     this.swarm.on('error', (err: Error) => {
@@ -52,91 +53,230 @@ export class Transport extends EventEmitter {
     })
   }
 
-  createRoom(): string {
-    const topic = crypto.randomBytes(32)
-    const roomId = b4a.toString(topic, 'hex')
-    return roomId
+  private handleConnection(peer: Peer, info: PeerInfo): void {
+    const connKey = b4a.toString(peer.remotePublicKey, 'hex').slice(0, 8)
+    console.log(`New connection: ${connKey}...`)
+
+    // Track this connection
+    const conn: PeerConnection = {
+      peer,
+      identityPubkey: null,
+      buffer: ''
+    }
+    this.connections.set(peer, conn)
+
+    peer.on('data', (data: Buffer) => {
+      this.handleData(peer, data)
+    })
+
+    peer.on('error', (err: Error) => {
+      console.error(`Connection error (${connKey}...):`, err.message)
+    })
+
+    peer.on('close', () => {
+      this.handleDisconnect(peer)
+    })
+
+    // Send our identity immediately
+    this.sendIdentify(peer)
   }
 
-  async joinRoom(roomId: string): Promise<Room> {
-    const normalizedId = roomId.toLowerCase()
-
-    // Check if already joined
-    let room = this.rooms.get(normalizedId)
-    if (room) {
-      return room
+  private sendIdentify(peer: Peer): void {
+    const packet: PeerIdentify = {
+      type: 'IDENTIFY',
+      publicKey: this.identity.publicKey
     }
+    const line = JSON.stringify(packet) + '\n'
+    peer.write(line)
+  }
 
-    // Validate room ID format
-    if (!/^[a-f0-9]{64}$/.test(normalizedId)) {
-      throw new Error('Invalid room ID format (expected 64 hex characters)')
-    }
+  private handleData(peer: Peer, data: Buffer): void {
+    const conn = this.connections.get(peer)
+    if (!conn) return
 
-    room = new Room(normalizedId)
-    this.rooms.set(normalizedId, room)
+    conn.buffer += b4a.toString(data, 'utf8')
 
-    // Set up room event forwarding
-    room.on('message', (msg: PeerMessage) => {
-      this.emit('message', normalizedId, msg)
-    })
+    // Process complete JSON lines
+    let newlineIdx: number
+    while ((newlineIdx = conn.buffer.indexOf('\n')) !== -1) {
+      const line = conn.buffer.slice(0, newlineIdx)
+      conn.buffer = conn.buffer.slice(newlineIdx + 1)
 
-    room.on('peer-connected', () => {
-      this.emit('room-connected', normalizedId)
-    })
-
-    room.on('peer-disconnected', () => {
-      if (!room!.isConnected) {
-        this.emit('room-disconnected', normalizedId)
+      if (line.trim()) {
+        try {
+          const packet = JSON.parse(line) as PeerPacket
+          this.handlePacket(peer, conn, packet)
+        } catch (err) {
+          console.error('Failed to parse packet:', line.slice(0, 50))
+        }
       }
-    })
+    }
+  }
 
-    // Join the swarm topic
-    const discovery = this.swarm.join(room.topic, { client: true, server: true })
-    this.discoveries.set(normalizedId, discovery)
+  private handlePacket(peer: Peer, conn: PeerConnection, packet: PeerPacket): void {
+    if (packet.type === 'IDENTIFY') {
+      this.handleIdentify(peer, conn, packet as PeerIdentify)
+    } else if (packet.type === 'MESSAGE') {
+      if (!conn.identityPubkey) {
+        console.error('Received MESSAGE before IDENTIFY')
+        return
+      }
+      // Check whitelist for incoming messages
+      if (this.config.whitelist && !this.config.whitelist.has(conn.identityPubkey)) {
+        console.log(`Message rejected (sender not on whitelist): ${conn.identityPubkey.slice(0, 16)}...`)
+        this.emit('peer-rejected', conn.identityPubkey)
+        return
+      }
+      this.emit('message', packet as PeerMessage, conn.identityPubkey)
+    } else if (packet.type === 'ACK') {
+      const pending = this.pendingAcks.get(packet.id)
+      if (pending) {
+        clearTimeout(pending.timeout)
+        this.pendingAcks.delete(packet.id)
+        pending.resolve()
+      }
+    }
+  }
 
-    // Wait for initial peer discovery
+  private handleIdentify(peer: Peer, conn: PeerConnection, packet: PeerIdentify): void {
+    const pubkey = packet.publicKey.toLowerCase()
+
+    // Validate pubkey format
+    if (!/^[a-f0-9]{64}$/.test(pubkey)) {
+      console.error('Invalid IDENTIFY pubkey format')
+      peer.end()
+      return
+    }
+
+    // Check if we already have a connection to this identity
+    const existingPeer = this.peersByIdentity.get(pubkey)
+    if (existingPeer && existingPeer !== peer) {
+      // Duplicate connection, close the new one
+      console.log(`Duplicate connection from ${pubkey.slice(0, 16)}..., closing`)
+      peer.end()
+      return
+    }
+
+    // Store the identity mapping (whitelist checked on MESSAGE, not here)
+    conn.identityPubkey = pubkey
+    this.peersByIdentity.set(pubkey, peer)
+
+    console.log(`Peer identified: ${pubkey.slice(0, 16)}...`)
+    this.emit('peer-connected', pubkey)
+  }
+
+  private handleDisconnect(peer: Peer): void {
+    const conn = this.connections.get(peer)
+    if (!conn) return
+
+    // Clean up identity mapping
+    if (conn.identityPubkey) {
+      const currentPeer = this.peersByIdentity.get(conn.identityPubkey)
+      if (currentPeer === peer) {
+        this.peersByIdentity.delete(conn.identityPubkey)
+        console.log(`Peer disconnected: ${conn.identityPubkey.slice(0, 16)}...`)
+        this.emit('peer-disconnected', conn.identityPubkey)
+      }
+    }
+
+    this.connections.delete(peer)
+  }
+
+  async start(): Promise<void> {
+    // Join swarm with our own public key as topic
+    // Other peers connect to us by joining our topic
+    this.discovery = this.swarm.join(this.topic, { client: true, server: true })
+    await this.discovery.flushed()
+    console.log(`Swarm started, topic: ${this.identity.publicKey.slice(0, 16)}...`)
+  }
+
+  async connectToPeer(pubkey: string): Promise<void> {
+    // To connect to a peer, we join their topic (their public key)
+    const peerTopic = b4a.from(pubkey, 'hex')
+    const discovery = this.swarm.join(peerTopic, { client: true, server: false })
     await discovery.flushed()
-
-    console.log(`Joined room ${normalizedId.slice(0, 8)}...`)
-    return room
   }
 
-  async leaveRoom(roomId: string): Promise<void> {
-    const normalizedId = roomId.toLowerCase()
-    const room = this.rooms.get(normalizedId)
+  sendMessage(recipientPubkey: string, id: string, mime: string, timeoutMs: number = 30000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const peer = this.peersByIdentity.get(recipientPubkey)
+      if (!peer) {
+        reject(new Error(`Peer not connected: ${recipientPubkey.slice(0, 16)}...`))
+        return
+      }
 
-    if (room) {
-      room.destroy()
-      this.rooms.delete(normalizedId)
+      const packet: PeerMessage = {
+        type: 'MESSAGE',
+        id,
+        from: this.identity.publicKey,
+        mime
+      }
+
+      const line = JSON.stringify(packet) + '\n'
+
+      // Set up ACK timeout
+      const timeout = setTimeout(() => {
+        this.pendingAcks.delete(id)
+        reject(new Error(`ACK timeout for message ${id}`))
+      }, timeoutMs)
+
+      this.pendingAcks.set(id, { resolve, reject, timeout })
+
+      peer.write(line)
+    })
+  }
+
+  sendAck(recipientPubkey: string, messageId: string): void {
+    const peer = this.peersByIdentity.get(recipientPubkey)
+    if (!peer) {
+      console.error(`Cannot send ACK, peer not connected: ${recipientPubkey.slice(0, 16)}...`)
+      return
     }
 
-    const discovery = this.discoveries.get(normalizedId)
-    if (discovery) {
-      await discovery.destroy()
-      this.discoveries.delete(normalizedId)
+    const packet: PeerAck = {
+      type: 'ACK',
+      id: messageId
     }
 
-    await this.swarm.leave(b4a.from(normalizedId, 'hex'))
+    const line = JSON.stringify(packet) + '\n'
+    peer.write(line)
   }
 
-  getRoom(roomId: string): Room | undefined {
-    return this.rooms.get(roomId.toLowerCase())
+  getPeer(pubkey: string): Peer | undefined {
+    return this.peersByIdentity.get(pubkey)
   }
 
-  getRoomIds(): string[] {
-    return Array.from(this.rooms.keys())
+  isPeerConnected(pubkey: string): boolean {
+    return this.peersByIdentity.has(pubkey)
+  }
+
+  getConnectedPeers(): string[] {
+    return Array.from(this.peersByIdentity.keys())
+  }
+
+  get peerCount(): number {
+    return this.peersByIdentity.size
   }
 
   async destroy(): Promise<void> {
-    for (const room of this.rooms.values()) {
-      room.destroy()
+    // Clear pending ACKs
+    for (const [id, pending] of this.pendingAcks) {
+      clearTimeout(pending.timeout)
+      pending.reject(new Error('Transport destroyed'))
     }
-    this.rooms.clear()
+    this.pendingAcks.clear()
 
-    for (const discovery of this.discoveries.values()) {
-      await discovery.destroy()
+    // Close all connections
+    for (const peer of this.connections.keys()) {
+      peer.end()
     }
-    this.discoveries.clear()
+    this.connections.clear()
+    this.peersByIdentity.clear()
+
+    // Leave swarm
+    if (this.discovery) {
+      await this.discovery.destroy()
+    }
 
     await this.swarm.destroy()
   }
