@@ -38,6 +38,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cursor/
 my-claude-rules.md
 CLAUDE.md
-
+AGENT.md
 # pear-mail local config (contains room keys)
 .quince/
