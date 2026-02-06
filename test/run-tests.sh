@@ -233,12 +233,53 @@ test_setup_identities() {
   fi
 }
 
+test_add_peer_saves_config() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: add-peer persists peer to config.json"
+
+  # Add a peer for ALICE
+  HOME="$ALICE_HOME" "$BARE" "$QUINCE" add-peer bob "$BOB_PUBKEY" > /dev/null 2>&1
+
+  local config_file="$ALICE_HOME/.quince/config.json"
+
+  # Config file must exist
+  if [ ! -f "$config_file" ]; then
+    fail "add-peer did not create config.json"
+    return 1
+  fi
+
+  # Config file must contain the peer alias and pubkey
+  local config_content
+  config_content=$(cat "$config_file")
+
+  if echo "$config_content" | grep -q '"bob"' && echo "$config_content" | grep -qi "$BOB_PUBKEY"; then
+    pass "add-peer persisted peer 'bob' to config.json"
+  else
+    fail "add-peer did not persist peer to config.json"
+    echo "Config content: $config_content"
+    return 1
+  fi
+
+  # Remove the peer and verify it's gone
+  HOME="$ALICE_HOME" "$BARE" "$QUINCE" remove-peer bob > /dev/null 2>&1
+  config_content=$(cat "$config_file")
+
+  if echo "$config_content" | grep -q '"bob"'; then
+    fail "remove-peer did not remove peer from config.json"
+    echo "Config content: $config_content"
+    return 1
+  fi
+
+  # Re-add for subsequent tests
+  HOME="$ALICE_HOME" "$BARE" "$QUINCE" add-peer bob "$BOB_PUBKEY" > /dev/null 2>&1
+  return 0
+}
+
 test_setup_whitelists() {
   TESTS_RUN=$((TESTS_RUN + 1))
   log "Test: Configure mutual whitelists for ALICE and BOB"
 
-  # Both peers need each other on the whitelist for bidirectional communication
-  HOME="$ALICE_HOME" "$BARE" "$QUINCE" add-peer bob "$BOB_PUBKEY" > /dev/null 2>&1
+  # ALICE already has bob from test_add_peer_saves_config; add alice for BOB
   HOME="$BOB_HOME" "$BARE" "$QUINCE" add-peer alice "$ALICE_PUBKEY" > /dev/null 2>&1
 
   # Verify both have each other
@@ -406,6 +447,7 @@ main() {
 
   # Integration tests
   test_setup_identities
+  test_add_peer_saves_config
   test_setup_whitelists
   test_start_daemons
   test_alice_to_bob_succeeds

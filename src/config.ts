@@ -109,13 +109,30 @@ export function loadConfig(): Config {
         console.error('Using default values for invalid fields.')
         // Return only valid fields
         const config: Config = {}
-        if (typeof parsed.username === 'string' && parsed.username.length > 0) {
+        if (typeof parsed.username === 'string' && parsed.username.length > 0 &&
+            /^[a-zA-Z0-9._-]+$/.test(parsed.username)) {
           config.username = parsed.username
         }
-        if (typeof parsed.smtpPort === 'number' && parsed.smtpPort >= 1 && parsed.smtpPort <= 65535) {
+        if (typeof parsed.smtpPort === 'number' && Number.isInteger(parsed.smtpPort) &&
+            parsed.smtpPort >= 1 && parsed.smtpPort <= 65535) {
           config.smtpPort = parsed.smtpPort
         }
-        // Skip invalid peers entirely
+        if (typeof parsed.pop3Port === 'number' && Number.isInteger(parsed.pop3Port) &&
+            parsed.pop3Port >= 1 && parsed.pop3Port <= 65535) {
+          config.pop3Port = parsed.pop3Port
+        }
+        // Only keep individually-valid peers
+        if (typeof parsed.peers === 'object' && parsed.peers !== null && !Array.isArray(parsed.peers)) {
+          const validPeers: Record<string, string> = {}
+          for (const [alias, pubkey] of Object.entries(parsed.peers as Record<string, unknown>)) {
+            if (!validateAlias(alias) && typeof pubkey === 'string' && !validatePublicKey(pubkey)) {
+              validPeers[alias] = (pubkey as string).toLowerCase()
+            }
+          }
+          if (Object.keys(validPeers).length > 0) {
+            config.peers = validPeers
+          }
+        }
         return config
       }
 
@@ -138,14 +155,14 @@ export function loadConfig(): Config {
   return {}
 }
 
-export function saveConfig(config: Config): void {
+export function saveConfig(config: Config): boolean {
   const errors = validateConfig(config)
   if (errors.length > 0) {
     console.error('Cannot save invalid config:')
     for (const err of errors) {
       console.error(`  - ${err.field}: ${err.message}`)
     }
-    return
+    return false
   }
 
   try {
@@ -153,8 +170,10 @@ export function saveConfig(config: Config): void {
       fs.mkdirSync(CONFIG_DIR, { recursive: true })
     }
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2))
+    return true
   } catch (err) {
     console.error('Failed to save config:', err)
+    return false
   }
 }
 

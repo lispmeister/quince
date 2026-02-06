@@ -130,7 +130,11 @@ async function handleAddPeer(alias: string, pubkey: string): Promise<void> {
   }
 
   config = addPeer(config, alias, pubkey)
-  saveConfig(config)
+
+  if (!saveConfig(config)) {
+    console.error('Error: Failed to save config')
+    process.exit(1)
+  }
 
   console.log(`Added peer '${alias}'`)
   console.log(`  Pubkey: ${pubkey.toLowerCase()}`)
@@ -144,7 +148,11 @@ async function handleRemovePeer(alias: string): Promise<void> {
   }
 
   config = removePeer(config, alias)
-  saveConfig(config)
+
+  if (!saveConfig(config)) {
+    console.error('Error: Failed to save config')
+    process.exit(1)
+  }
 
   console.log(`Removed peer '${alias}'`)
 }
