@@ -339,7 +339,7 @@ quince help                       # Show help
 - Verification on receive (warn on failure, still deliver)
 - New `src/crypto.ts`: `signMessage()` and `verifyMessage()`
 
-### M7: Inbox Storage (was M6)
+### M7: Inbox Storage ✓
 - Write received messages to `~/.quince/inbox/<timestamp>-<id>.eml`
 - Index file for message metadata
 
