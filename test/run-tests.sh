@@ -13,6 +13,8 @@ ALICE_HOME="$TEST_DIR/alice"
 BOB_HOME="$TEST_DIR/bob"
 ALICE_PORT=2525
 BOB_PORT=2526
+ALICE_POP3_PORT=1110
+BOB_POP3_PORT=1111
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BARE="$PROJECT_DIR/node_modules/.bin/bare"
 QUINCE="$PROJECT_DIR/dist/index.js"
@@ -58,7 +60,7 @@ cleanup() {
   stop_daemon "ALICE" "$ALICE_HOME" 2>/dev/null
   stop_daemon "BOB" "$BOB_HOME" 2>/dev/null
   # Kill anything still holding our test ports
-  lsof -ti :$ALICE_PORT -ti :$BOB_PORT 2>/dev/null | xargs kill 2>/dev/null || true
+  lsof -ti :$ALICE_PORT -ti :$BOB_PORT -ti :$ALICE_POP3_PORT -ti :$BOB_POP3_PORT 2>/dev/null | xargs kill 2>/dev/null || true
   sleep 1
   rm -rf "$TEST_DIR"
 }
@@ -88,9 +90,10 @@ start_daemon() {
   local name=$1
   local home=$2
   local port=$3
+  local pop3_port=$4
 
-  log "Starting $name daemon on port $port..."
-  HOME="$home" SMTP_PORT="$port" "$BARE" "$QUINCE" start > "$home/daemon.log" 2>&1 &
+  log "Starting $name daemon on port $port (POP3: $pop3_port)..."
+  HOME="$home" SMTP_PORT="$port" POP3_PORT="$pop3_port" "$BARE" "$QUINCE" start > "$home/daemon.log" 2>&1 &
   echo $! > "$home/daemon.pid"
 }
 
@@ -243,8 +246,8 @@ test_start_daemons() {
   TESTS_RUN=$((TESTS_RUN + 1))
   log "Test: Start ALICE and BOB daemons"
 
-  start_daemon "ALICE" "$ALICE_HOME" "$ALICE_PORT"
-  start_daemon "BOB" "$BOB_HOME" "$BOB_PORT"
+  start_daemon "ALICE" "$ALICE_HOME" "$ALICE_PORT" "$ALICE_POP3_PORT"
+  start_daemon "BOB" "$BOB_HOME" "$BOB_PORT" "$BOB_POP3_PORT"
 
   # Wait for both daemons to be ready
   local alice_ready=false

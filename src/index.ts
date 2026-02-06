@@ -24,12 +24,14 @@ import {
   EMAIL_DOMAIN
 } from './identity.js'
 import { signMessage, verifyMessage } from './crypto.js'
-import { storeMessage, listMessages, getInboxPath } from './inbox.js'
+import { storeMessage, listMessages, getMessageContent, deleteMessage, getInboxPath } from './inbox.js'
+import { Pop3Server } from './pop3/index.js'
 
 let config = loadConfig()
 const identity = loadIdentity()
 
 const PORT = parseInt(env.SMTP_PORT ?? String(config.smtpPort ?? 2525), 10)
+const POP3_PORT = parseInt(env.POP3_PORT ?? String(config.pop3Port ?? 1110), 10)
 const HOSTNAME = env.HOSTNAME ?? 'quince.local'
 const LOCAL_USER = env.LOCAL_USER ?? config.username ?? 'user'
 
@@ -55,6 +57,7 @@ Commands:
 
 Environment Variables:
   SMTP_PORT    SMTP server port (default: 2525)
+  POP3_PORT    POP3 server port (default: 1110)
   HOSTNAME     Server hostname (default: quince.local)
   LOCAL_USER   Local username (default: user)
 
@@ -153,6 +156,7 @@ async function showConfig(): Promise<void> {
   console.log('Effective settings:')
   console.log(`  LOCAL_USER: ${LOCAL_USER}`)
   console.log(`  SMTP_PORT: ${PORT}`)
+  console.log(`  POP3_PORT: ${POP3_PORT}`)
   console.log(`  HOSTNAME: ${HOSTNAME}`)
   console.log(`  Public key: ${identity.publicKey.slice(0, 16)}...`)
 }
@@ -276,6 +280,7 @@ async function startDaemon(): Promise<void> {
   console.log(`  User: ${LOCAL_USER}`)
   console.log(`  Email: ${emailAddr}`)
   console.log(`  SMTP: localhost:${PORT}`)
+  console.log(`  POP3: localhost:${POP3_PORT}`)
   console.log(`  Peers: ${peerCount} (whitelist mode)`)
 
   const transport = new Transport(identity, { whitelist })
@@ -452,6 +457,24 @@ async function startDaemon(): Promise<void> {
     process.exit(1)
   }
 
+  const pop3Server = new Pop3Server({
+    port: POP3_PORT,
+    hostname: HOSTNAME,
+    username: LOCAL_USER,
+    getMessages: listMessages,
+    getMessageContent,
+    deleteMessage
+  })
+
+  try {
+    await pop3Server.start()
+  } catch (err) {
+    console.error('Failed to start POP3 server:', err)
+    await smtpServer.stop()
+    await transport.destroy()
+    process.exit(1)
+  }
+
   // Graceful shutdown
   const shutdown = async () => {
     if (isShuttingDown) return
@@ -469,6 +492,14 @@ async function startDaemon(): Promise<void> {
       console.log('  SMTP server stopped')
     } catch (err) {
       console.error('  Error stopping SMTP server:', err)
+    }
+
+    // Close POP3 server
+    try {
+      await pop3Server.stop()
+      console.log('  POP3 server stopped')
+    } catch (err) {
+      console.error('  Error stopping POP3 server:', err)
     }
 
     // Close transport

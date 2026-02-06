@@ -6,6 +6,7 @@ import { validatePublicKey } from './identity.js'
 export interface Config {
   username?: string
   smtpPort?: number
+  pop3Port?: number
   peers?: Record<string, string>  // alias -> pubkey
 }
 

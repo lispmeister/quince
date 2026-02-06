@@ -99,6 +99,36 @@ export function listMessages(): InboxEntry[] {
   return loadIndex()
 }
 
+export function getMessageContent(entry: InboxEntry): string | null {
+  const filepath = path.join(getInboxDir(), entry.file)
+  try {
+    if (fs.existsSync(filepath)) {
+      return fs.readFileSync(filepath, 'utf8') as string
+    }
+  } catch (err) {
+    console.error(`Failed to read message ${entry.file}:`, err)
+  }
+  return null
+}
+
+export function deleteMessage(entry: InboxEntry): void {
+  const filepath = path.join(getInboxDir(), entry.file)
+
+  // Remove .eml file
+  try {
+    if (fs.existsSync(filepath)) {
+      fs.unlinkSync(filepath)
+    }
+  } catch (err) {
+    console.error(`Failed to delete message file ${entry.file}:`, err)
+  }
+
+  // Remove from index
+  const index = loadIndex()
+  const filtered = index.filter(e => e.id !== entry.id)
+  saveIndex(filtered)
+}
+
 export function getInboxPath(): string {
   return getInboxDir()
 }

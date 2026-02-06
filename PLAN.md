@@ -343,20 +343,21 @@ quince help                       # Show help
 - Write received messages to `~/.quince/inbox/<timestamp>-<id>.eml`
 - Index file for message metadata
 
-### M8: IMAP Server
-- IMAP4 server on localhost (default port 993 or 1993)
-- Serves messages from `~/.quince/inbox/`
-- Enables MUA to retrieve received mail
-- Combined with DNS wildcard, MUA configures `<pubkey>.quincemail.com` as IMAP server
+### M8: POP3 Server
+- POP3 server on localhost (default port 1110)
+- Auth: accept configured username, any password (localhost only)
+- Serve `.eml` files from `~/.quince/inbox/`
+- DELE marks messages for deletion, QUIT commits
+- Combined with DNS wildcard, MUA configures `<pubkey>.quincemail.com` as POP3 server
 
 ### M9: Full MUA Integration
 - SMTP server on standard port (587 or 2525)
-- IMAP server for retrieval
+- POP3 server for retrieval
 - TLS support (self-signed or Let's Encrypt for localhost)
 - MUA auto-configuration via `<pubkey>.quincemail.com`
 
 ### Future Enhancements
-- Integration tests with two daemons
+- IMAP4 server (folders, read/unread flags, multi-device sync)
 - SMTP AUTH for multi-user scenarios
 - Sent folder synchronization
 - Contact/alias synchronization across devices
