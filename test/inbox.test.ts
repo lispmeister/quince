@@ -163,9 +163,9 @@ describe('inbox with signed messages', () => {
     const messages = listMessages(testDir)
     expect(messages[0]!.signatureValid).toBe(true)
 
-    // .eml should have signature stripped
+    // .eml should have signature preserved
     const content = fs.readFileSync(path.join(testDir, messages[0]!.file), 'utf8')
-    expect(content).not.toContain('X-Quince-Signature')
+    expect(content).toContain('X-Quince-Signature')
     expect(content).toContain('Hello from Alice!')
   })
 

@@ -53,7 +53,7 @@ describe('verifyMessage', () => {
     const { mime, valid } = verifyMessage(signed, alice.publicKey)
 
     expect(valid).toBe(true)
-    expect(mime).toBe(VALID_MIME)
+    expect(mime).toBe(signed)
   })
 
   test('wrong pubkey returns valid=false', () => {
@@ -95,12 +95,12 @@ describe('verifyMessage', () => {
     expect(valid).toBe(false)
   })
 
-  test('strips signature header from returned MIME', () => {
+  test('preserves signature header in returned MIME', () => {
     const alice = makeKeyPair()
     const signed = signMessage(VALID_MIME, alice.secretKey)
     const { mime } = verifyMessage(signed, alice.publicKey)
 
-    expect(mime).not.toContain('X-Quince-Signature')
-    expect(mime).toBe(VALID_MIME)
+    expect(mime).toContain('X-Quince-Signature')
+    expect(mime).toBe(signed)
   })
 })

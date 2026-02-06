@@ -33,8 +33,8 @@ export function signMessage(mime: string, secretKey: string): string {
 }
 
 /**
- * Verify a MIME message signature. Strips the X-Quince-Signature header and
- * returns the clean MIME along with the verification result.
+ * Verify a MIME message signature. Returns the original MIME (with
+ * X-Quince-Signature header preserved) along with the verification result.
  */
 export function verifyMessage(mime: string, senderPubkey: string): { mime: string; valid: boolean } {
   const parts = splitHeadersAndBody(mime)
@@ -49,14 +49,10 @@ export function verifyMessage(mime: string, senderPubkey: string): { mime: strin
   const sigHex = sigLine.slice(SIGNATURE_HEADER.length + 1).trim()
   if (!/^[a-f0-9]{128}$/i.test(sigHex)) return { mime, valid: false }
 
-  // Rebuild headers without the signature line
-  const cleanHeaders = headerLines.filter(l => !l.startsWith(`${SIGNATURE_HEADER}:`)).join('\r\n')
-  const cleanMime = `${cleanHeaders}\r\n\r\n${parts.body}`
-
   const hash = hashBody(parts.body)
   const sig = b4a.from(sigHex, 'hex')
   const pubkey = b4a.from(senderPubkey, 'hex')
   const valid = crypto.verify(hash, sig, pubkey)
 
-  return { mime: cleanMime, valid }
+  return { mime, valid }
 }

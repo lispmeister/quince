@@ -69,7 +69,7 @@ describe('end-to-end: Alice sends to Bob', () => {
     expect(mime).toContain('From: ' + fromAddr)
     expect(mime).toContain('Subject: Hello Bob')
     expect(mime).toContain('This is a secret message.')
-    expect(mime).not.toContain('X-Quince-Signature')
+    expect(mime).toContain('X-Quince-Signature')
   })
 
   test('invalid signature: Bob rejects message verified against wrong key', async () => {
@@ -97,7 +97,7 @@ describe('end-to-end: Alice sends to Bob', () => {
     const { encodedMime } = await simulateSend(fromAddr, toAddr, bodyLines, ALICE.secretKey)
     const { mime } = simulateReceive(encodedMime, ALICE.publicKey)
 
-    // The verified MIME should have the signature stripped but content intact
+    // The verified MIME should have the signature preserved and content intact
     const sepIndex = mime.indexOf('\r\n\r\n')
     expect(sepIndex).toBeGreaterThan(0)
 
