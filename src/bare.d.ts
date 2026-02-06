@@ -119,6 +119,7 @@ declare module 'bare-tcp' {
   }
 
   interface Server extends EventEmitter {
+    listen(port: number, host?: string, callback?: () => void): void
     listen(port: number, callback?: () => void): void
     close(callback?: () => void): void
     address(): { port: number } | string | null

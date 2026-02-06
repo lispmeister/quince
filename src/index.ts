@@ -32,6 +32,7 @@ const identity = loadIdentity()
 
 const PORT = parseInt(env.SMTP_PORT ?? String(config.smtpPort ?? 2525), 10)
 const POP3_PORT = parseInt(env.POP3_PORT ?? String(config.pop3Port ?? 1110), 10)
+const BIND_ADDR = env.BIND_ADDR ?? '127.0.0.1'
 const HOSTNAME = env.HOSTNAME ?? 'quince.local'
 const LOCAL_USER = env.LOCAL_USER ?? config.username ?? 'user'
 
@@ -58,6 +59,7 @@ Commands:
 Environment Variables:
   SMTP_PORT    SMTP server port (default: 2525)
   POP3_PORT    POP3 server port (default: 1110)
+  BIND_ADDR    Bind address (default: 127.0.0.1)
   HOSTNAME     Server hostname (default: quince.local)
   LOCAL_USER   Local username (default: user)
 
@@ -157,6 +159,7 @@ async function showConfig(): Promise<void> {
   console.log(`  LOCAL_USER: ${LOCAL_USER}`)
   console.log(`  SMTP_PORT: ${PORT}`)
   console.log(`  POP3_PORT: ${POP3_PORT}`)
+  console.log(`  BIND_ADDR: ${BIND_ADDR}`)
   console.log(`  HOSTNAME: ${HOSTNAME}`)
   console.log(`  Public key: ${identity.publicKey.slice(0, 16)}...`)
 }
@@ -279,8 +282,8 @@ async function startDaemon(): Promise<void> {
   console.log('Starting quince daemon...')
   console.log(`  User: ${LOCAL_USER}`)
   console.log(`  Email: ${emailAddr}`)
-  console.log(`  SMTP: localhost:${PORT}`)
-  console.log(`  POP3: localhost:${POP3_PORT}`)
+  console.log(`  SMTP: ${BIND_ADDR}:${PORT}`)
+  console.log(`  POP3: ${BIND_ADDR}:${POP3_PORT}`)
   console.log(`  Peers: ${peerCount} (whitelist mode)`)
 
   const transport = new Transport(identity, { whitelist })
@@ -444,6 +447,7 @@ async function startDaemon(): Promise<void> {
 
   const smtpServer = new SmtpServer({
     port: PORT,
+    host: BIND_ADDR,
     hostname: HOSTNAME,
     localUser: LOCAL_USER,
     onMessage
@@ -459,6 +463,7 @@ async function startDaemon(): Promise<void> {
 
   const pop3Server = new Pop3Server({
     port: POP3_PORT,
+    host: BIND_ADDR,
     hostname: HOSTNAME,
     username: LOCAL_USER,
     getMessages: listMessages,

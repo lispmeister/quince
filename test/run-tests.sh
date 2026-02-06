@@ -169,6 +169,19 @@ check_log_contains() {
   grep -q "$text" "$logfile" 2>/dev/null
 }
 
+pop3_session() {
+  local port=$1
+  shift
+  # Remaining args are commands to send
+  {
+    sleep 0.3
+    for cmd in "$@"; do
+      echo "$cmd"
+      sleep 0.3
+    done
+  } | nc localhost "$port" 2>/dev/null || true
+}
+
 #
 # Unit tests (bun test)
 #

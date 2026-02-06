@@ -351,12 +351,15 @@ quince help                       # Show help
 - Combined with DNS wildcard, MUA configures `<pubkey>.quincemail.com` as POP3 server
 
 ### M9: Full MUA Integration
-- SMTP server on standard port (587 or 2525)
-- POP3 server for retrieval
-- TLS support (self-signed or Let's Encrypt for localhost)
-- MUA auto-configuration via `<pubkey>.quincemail.com`
+- DNS: wildcard `*.quincemail.com` → 127.0.0.1 / ::1 (manual setup)
+- SMTP EHLO extensions: advertise SIZE and 8BITMIME for MUA compatibility
+- Configurable bind address (`BIND_ADDR` env var, default 127.0.0.1)
+- MUA configuration guide (Thunderbird, Apple Mail)
+- README overhaul: complete setup walkthrough (identity, peers, DNS, MUA config)
 
 ### Future Enhancements
+- TLS support (only needed if binding to non-localhost)
+- MUA auto-configuration / autoconfig XML
 - IMAP4 server (folders, read/unread flags, multi-device sync)
 - SMTP AUTH for multi-user scenarios
 - Sent folder synchronization

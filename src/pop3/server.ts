@@ -3,6 +3,7 @@ import { Pop3Session, type Pop3SessionConfig } from './session.js'
 
 export interface Pop3ServerConfig {
   port: number
+  host?: string
   hostname: string
   username: string
   getMessages: Pop3SessionConfig['getMessages']
@@ -30,7 +31,7 @@ export class Pop3Server {
         reject(err)
       })
 
-      this.server.listen(this.config.port, () => {
+      this.server.listen(this.config.port, this.config.host ?? '127.0.0.1', () => {
         const addr = this.server!.address()
         const port = (addr && typeof addr === 'object') ? addr.port : this.config.port
         console.log(`POP3 server listening on port ${port}`)

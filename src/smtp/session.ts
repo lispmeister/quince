@@ -69,8 +69,7 @@ export class SmtpSession {
     }
     this.state = 'READY'
     this.resetTransaction()
-    // No extensions for MVP
-    return `250 ${this.config.hostname}\r\n`
+    return `250-${this.config.hostname}\r\n250-SIZE 10485760\r\n250 8BITMIME\r\n`
   }
 
   private handleMail(arg: string): string {

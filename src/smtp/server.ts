@@ -3,6 +3,7 @@ import { SmtpSession } from './session.js'
 
 export interface SmtpServerConfig {
   port: number
+  host?: string
   hostname: string
   localUser: string
   onMessage: (from: string, to: string, data: string) => Promise<void>
@@ -28,7 +29,7 @@ export class SmtpServer {
         reject(err)
       })
 
-      this.server.listen(this.config.port, () => {
+      this.server.listen(this.config.port, this.config.host ?? '127.0.0.1', () => {
         const addr = this.server!.address()
         const port = (addr && typeof addr === 'object') ? addr.port : this.config.port
         console.log(`SMTP server listening on port ${port}`)

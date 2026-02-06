@@ -95,3 +95,22 @@ describe('SMTP DATA separator', () => {
     expect(hasSeparator).toBe(false)
   })
 })
+
+describe('SMTP EHLO extensions', () => {
+  test('EHLO advertises SIZE and 8BITMIME', () => {
+    const session = createSession(async () => {})
+    const resp = session.processLine('EHLO client.test')
+
+    expect(resp).toContain('250-')
+    expect(resp).toContain('SIZE')
+    expect(resp).toContain('8BITMIME')
+  })
+
+  test('HELO does not advertise extensions', () => {
+    const session = createSession(async () => {})
+    const resp = session.processLine('HELO client.test')
+
+    expect(resp).not.toContain('SIZE')
+    expect(resp).not.toContain('8BITMIME')
+  })
+})
