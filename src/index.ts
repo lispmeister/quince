@@ -539,7 +539,8 @@ async function startDaemon(): Promise<void> {
     }
 
     console.log('Goodbye!')
-    process.exit(0)
+    // Allow native handles to fully release before exiting
+    setTimeout(() => process.exit(0), 100)
   }
 
   process.on('SIGINT', shutdown)

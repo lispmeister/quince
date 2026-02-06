@@ -266,18 +266,11 @@ export class Transport extends EventEmitter {
     }
     this.pendingAcks.clear()
 
-    // Close all connections
-    for (const peer of this.connections.keys()) {
-      peer.end()
-    }
+    // Clear our tracking maps (swarm.destroy() handles closing peers)
     this.connections.clear()
     this.peersByIdentity.clear()
 
-    // Leave swarm
-    if (this.discovery) {
-      await this.discovery.destroy()
-    }
-
+    // Destroy swarm — this tears down discovery and all peer connections
     await this.swarm.destroy()
   }
 }
