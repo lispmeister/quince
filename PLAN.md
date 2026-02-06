@@ -343,7 +343,7 @@ quince help                       # Show help
 - Write received messages to `~/.quince/inbox/<timestamp>-<id>.eml`
 - Index file for message metadata
 
-### M8: POP3 Server
+### M8: POP3 Server ✓
 - POP3 server on localhost (default port 1110)
 - Auth: accept configured username, any password (localhost only)
 - Serve `.eml` files from `~/.quince/inbox/`
