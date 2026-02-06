@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "./node_modules/.bin/bare dist/index.js",
     "dev": "bun run build && bun run start",
+    "test": "bun test test/",
     "clean": "rm -rf dist"
   },
   "devDependencies": {

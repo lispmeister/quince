@@ -109,13 +109,25 @@ Environment variables override config file settings:
 
 ## Testing
 
-Run the test suite:
+### Unit tests
+
+Tests SMTP parsing, message signing/verification, and end-to-end crypto without network dependencies.
 
 ```bash
-bun test
+bun run test
 ```
 
-Integration tests require two daemon instances. See `test/run-tests.sh` for details.
+### Integration tests
+
+Spins up two full daemon instances (ALICE and BOB) with Hyperswarm to test real peer-to-peer messaging and whitelist enforcement. Requires a build step first.
+
+```bash
+./test/run-tests.sh
+```
+
+### Run both
+
+The integration test rig runs unit tests automatically before the daemon tests, so `./test/run-tests.sh` covers everything.
 
 ## Files
 

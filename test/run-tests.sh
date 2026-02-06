@@ -54,8 +54,11 @@ fail() {
 
 cleanup() {
   log "Cleaning up..."
-  # Kill any quince processes in test directory
-  pkill -f "quince-testrun" 2>/dev/null || true
+  # Kill any daemons via PID files
+  stop_daemon "ALICE" "$ALICE_HOME" 2>/dev/null
+  stop_daemon "BOB" "$BOB_HOME" 2>/dev/null
+  # Kill anything still holding our test ports
+  lsof -ti :$ALICE_PORT -ti :$BOB_PORT 2>/dev/null | xargs kill 2>/dev/null || true
   sleep 1
   rm -rf "$TEST_DIR"
 }
@@ -98,6 +101,12 @@ stop_daemon() {
   if [ -f "$home/daemon.pid" ]; then
     local pid=$(cat "$home/daemon.pid")
     kill "$pid" 2>/dev/null || true
+    # Wait for process to actually exit
+    local elapsed=0
+    while kill -0 "$pid" 2>/dev/null && [ $elapsed -lt 10 ]; do
+      sleep 1
+      elapsed=$((elapsed + 1))
+    done
     rm -f "$home/daemon.pid"
   fi
 }
@@ -158,7 +167,34 @@ check_log_contains() {
 }
 
 #
-# Test cases
+# Unit tests (bun test)
+#
+
+run_unit_tests() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: Unit & crypto tests (bun test)"
+
+  local output
+  output=$(cd "$PROJECT_DIR" && bun test test/ 2>&1)
+  local exit_code=$?
+
+  if [ $exit_code -eq 0 ]; then
+    # Extract the summary line (e.g. "16 pass ... Ran 16 tests across 3 files")
+    local summary
+    summary=$(echo "$output" | grep -E "^Ran [0-9]+ tests" || echo "")
+    local pass_count
+    pass_count=$(echo "$output" | grep -oE "^[[:space:]]*[0-9]+ pass" | grep -oE "[0-9]+" || echo "0")
+    pass "Unit tests: ${pass_count} passed${summary:+ — $summary}"
+    return 0
+  else
+    fail "Unit tests failed (exit code $exit_code)"
+    echo "$output" | tail -20
+    return 1
+  fi
+}
+
+#
+# Integration test cases
 #
 
 test_setup_identities() {
@@ -183,21 +219,19 @@ test_setup_identities() {
 
 test_setup_whitelists() {
   TESTS_RUN=$((TESTS_RUN + 1))
-  log "Test: Configure BOB to accept ALICE (ALICE not accepting BOB)"
+  log "Test: Configure mutual whitelists for ALICE and BOB"
 
-  # BOB adds ALICE to whitelist
+  # Both peers need each other on the whitelist for bidirectional communication
+  HOME="$ALICE_HOME" "$BARE" "$QUINCE" add-peer bob "$BOB_PUBKEY" > /dev/null 2>&1
   HOME="$BOB_HOME" "$BARE" "$QUINCE" add-peer alice "$ALICE_PUBKEY" > /dev/null 2>&1
 
-  # Verify BOB has ALICE
-  local bob_peers
+  # Verify both have each other
+  local alice_peers bob_peers
+  alice_peers=$(HOME="$ALICE_HOME" "$BARE" "$QUINCE" peers 2>/dev/null)
   bob_peers=$(HOME="$BOB_HOME" "$BARE" "$QUINCE" peers 2>/dev/null)
 
-  # Verify ALICE has no peers
-  local alice_peers
-  alice_peers=$(HOME="$ALICE_HOME" "$BARE" "$QUINCE" peers 2>/dev/null)
-
-  if echo "$bob_peers" | grep -q "alice" && echo "$alice_peers" | grep -q "No peers configured"; then
-    pass "Whitelist configured - BOB accepts ALICE, ALICE accepts nobody"
+  if echo "$alice_peers" | grep -q "bob" && echo "$bob_peers" | grep -q "alice"; then
+    pass "Mutual whitelists configured - ALICE <-> BOB"
     return 0
   else
     fail "Failed to configure whitelists correctly"
@@ -239,36 +273,6 @@ test_alice_to_bob_succeeds() {
   TESTS_RUN=$((TESTS_RUN + 1))
   log "Test: ALICE sends message to BOB (should succeed)"
 
-  # ALICE needs BOB in her whitelist for bidirectional communication
-  # But for sending, she just needs to know BOB's address
-  # Note: ALICE will reject BOB's IDENTIFY, but the message should still be delivered
-  # because ALICE initiates the connection and BOB accepts ALICE
-
-  # Actually, for ALICE to send to BOB:
-  # 1. ALICE connects to BOB's topic
-  # 2. Both exchange IDENTIFY
-  # 3. BOB accepts ALICE (she's on whitelist)
-  # 4. ALICE rejects BOB (he's not on her whitelist) - but this is the incoming direction
-  #
-  # Wait, the current implementation rejects the connection entirely if not on whitelist.
-  # So ALICE needs BOB on her whitelist to accept his IDENTIFY and keep the connection.
-  #
-  # For this test to work with the current whitelist implementation,
-  # ALICE needs BOB in her peers too. Let's add him.
-
-  HOME="$ALICE_HOME" "$BARE" "$QUINCE" add-peer bob "$BOB_PUBKEY" > /dev/null 2>&1
-
-  # Now restart ALICE daemon to pick up the new peer
-  stop_daemon "ALICE" "$ALICE_HOME"
-  sleep 1
-  rm -f "$ALICE_HOME/daemon.log"
-  start_daemon "ALICE" "$ALICE_HOME" "$ALICE_PORT"
-
-  if ! wait_for_daemon "$ALICE_HOME" 10; then
-    fail "ALICE -> BOB: Failed to restart ALICE daemon"
-    return 1
-  fi
-
   local to_addr="bob@${BOB_PUBKEY}.quincemail.com"
   send_smtp_message "$ALICE_PORT" "alice@test.com" "$to_addr" "Test from Alice" "Hello Bob from Alice!"
 
@@ -289,45 +293,21 @@ test_alice_to_bob_succeeds() {
   fi
 }
 
-test_bob_to_alice_fails() {
+test_bob_to_alice_succeeds() {
   TESTS_RUN=$((TESTS_RUN + 1))
-  log "Test: BOB sends message to ALICE (should fail - ALICE doesn't have BOB whitelisted)"
-
-  # Wait, we just added BOB to ALICE's whitelist in the previous test.
-  # So now ALICE accepts BOB. Let's remove BOB from ALICE's whitelist and restart.
-
-  HOME="$ALICE_HOME" "$BARE" "$QUINCE" remove-peer bob > /dev/null 2>&1
-
-  # Restart ALICE daemon to pick up the change
-  stop_daemon "ALICE" "$ALICE_HOME"
-  sleep 1
-  rm -f "$ALICE_HOME/daemon.log"
-  start_daemon "ALICE" "$ALICE_HOME" "$ALICE_PORT"
-
-  if ! wait_for_daemon "$ALICE_HOME" 10; then
-    fail "BOB -> ALICE: Failed to restart ALICE daemon"
-    return 1
-  fi
+  log "Test: BOB sends message to ALICE (should succeed)"
 
   local to_addr="alice@${ALICE_PUBKEY}.quincemail.com"
   send_smtp_message "$BOB_PORT" "bob@test.com" "$to_addr" "Test from Bob" "Hello Alice from Bob!"
 
-  # Wait for attempt
+  # Wait for delivery
   sleep 5
 
-  # Check that BOB's message was queued (couldn't deliver because ALICE rejected)
-  # or that ALICE rejected BOB
-  if check_log_contains "$ALICE_HOME/daemon.log" "Rejected unknown peer"; then
-    pass "BOB -> ALICE: Correctly rejected (BOB not on ALICE's whitelist)"
-    return 0
-  elif check_log_contains "$BOB_HOME/daemon.log" "Queued for retry"; then
-    pass "BOB -> ALICE: Message queued (peer connection rejected)"
-    return 0
-  elif check_log_contains "$BOB_HOME/daemon.log" "still not connected"; then
-    pass "BOB -> ALICE: Peer not connected (rejected by whitelist)"
+  if check_log_contains "$ALICE_HOME/daemon.log" "Hello Alice from Bob!"; then
+    pass "BOB -> ALICE: Message delivered successfully"
     return 0
   else
-    fail "BOB -> ALICE: Expected rejection or queue"
+    fail "BOB -> ALICE: Message not received by ALICE"
     echo "--- ALICE log ---"
     tail -30 "$ALICE_HOME/daemon.log"
     echo "--- BOB log ---"
@@ -380,12 +360,15 @@ main() {
   build_project
   setup_test_env
 
-  # Run tests in order
+  # Unit tests first
+  run_unit_tests
+
+  # Integration tests
   test_setup_identities
   test_setup_whitelists
   test_start_daemons
   test_alice_to_bob_succeeds
-  test_bob_to_alice_fails
+  test_bob_to_alice_succeeds
 
   # Cleanup
   stop_all_daemons

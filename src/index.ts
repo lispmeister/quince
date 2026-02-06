@@ -23,6 +23,7 @@ import {
   validatePublicKey,
   EMAIL_DOMAIN
 } from './identity.js'
+import { signMessage, verifyMessage } from './crypto.js'
 
 let config = loadConfig()
 const identity = loadIdentity()
@@ -330,7 +331,13 @@ async function startDaemon(): Promise<void> {
     console.log(`--- Incoming message from ${display} ---`)
 
     try {
-      const mime = decodeBase64(msg.mime)
+      const raw = decodeBase64(msg.mime)
+      const { mime, valid } = verifyMessage(raw, senderPubkey)
+
+      if (!valid) {
+        console.log('WARNING: Signature verification failed')
+      }
+
       console.log(mime)
       console.log('------------------------')
 
@@ -378,8 +385,9 @@ async function startDaemon(): Promise<void> {
     }
 
     const fullMessage = `From: ${from}\r\nTo: ${to}\r\n${data}`
+    const signed = signMessage(fullMessage, identity.secretKey)
     const messageId = generateId()
-    const encoded = encodeBase64(fullMessage)
+    const encoded = encodeBase64(signed)
 
     const success = await trySendMessage(messageId, recipient.pubkey, recipient.display, encoded)
 

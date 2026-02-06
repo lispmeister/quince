@@ -135,7 +135,7 @@ export class SmtpSession {
   }
 
   private finishData(): string {
-    const data = this.dataBuffer.join('\n')
+    const data = this.dataBuffer.join('\r\n')
     this.transaction.data = data
 
     // Trigger message delivery (async, but we respond immediately for MVP)

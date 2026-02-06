@@ -32,7 +32,7 @@ export function validatePublicKey(pubkey: string): string | null {
 }
 
 export function generateIdentity(): Identity {
-  const keyPair: KeyPair = (crypto as any).keyPair()
+  const keyPair: KeyPair = crypto.keyPair()
   return {
     publicKey: b4a.toString(keyPair.publicKey, 'hex'),
     secretKey: b4a.toString(keyPair.secretKey, 'hex')

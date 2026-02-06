@@ -49,12 +49,13 @@ quince addresses this by using Pear's Hyperswarm for peer discovery and encrypte
 - [x] Outbound queue with exponential backoff retry for offline recipients
 - [x] Automatic peer discovery when sending to new recipients
 - [ ] Integration test: two daemon instances, simulated MUA send, verify receipt
+- [ ] Message authentication: X-Quince-Signature header (BLAKE2b body hash, Ed25519 signed)
 
 ### Out of Scope (Future Phases)
 
+- Message body encryption (transport encryption sufficient for point-to-point)
 - KEET identity integration and derived keys
 - Blind pairing for trust establishment
-- X-Pear-Signature message signing
 - Bounce messages for rejected senders (see Whitelist Mode below)
 - LMTP handoff to Postfix
 - IMAP server for retrieval (see DNS Strategy below)
@@ -331,17 +332,24 @@ quince help                       # Show help
 - Configuration validation
 - CLI for daemon and peer management
 
-### M6: Inbox Storage
+### M6: Message Authentication
+- BLAKE2b hash of MIME body
+- Ed25519 signature using sender's secret key
+- `X-Quince-Signature` header injected into outbound MIME
+- Verification on receive (warn on failure, still deliver)
+- New `src/crypto.ts`: `signMessage()` and `verifyMessage()`
+
+### M7: Inbox Storage (was M6)
 - Write received messages to `~/.quince/inbox/<timestamp>-<id>.eml`
 - Index file for message metadata
 
-### M7: IMAP Server
+### M8: IMAP Server
 - IMAP4 server on localhost (default port 993 or 1993)
 - Serves messages from `~/.quince/inbox/`
 - Enables MUA to retrieve received mail
 - Combined with DNS wildcard, MUA configures `<pubkey>.quincemail.com` as IMAP server
 
-### M8: Full MUA Integration
+### M9: Full MUA Integration
 - SMTP server on standard port (587 or 2525)
 - IMAP server for retrieval
 - TLS support (self-signed or Let's Encrypt for localhost)
