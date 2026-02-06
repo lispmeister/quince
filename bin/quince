@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Resolve symlinks to find the real project root
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+DIR="$(cd "$(dirname "$SOURCE")/.." && pwd)"
+exec "$DIR/node_modules/.bin/bare" "$DIR/dist/index.js" "$@"

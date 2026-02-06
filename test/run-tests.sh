@@ -332,6 +332,31 @@ test_bob_to_alice_succeeds() {
   fi
 }
 
+test_bad_permissions_refuses_start() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: Daemon refuses to start when private key has wrong permissions"
+
+  # Set overly permissive mode on ALICE's private key
+  chmod 644 "$ALICE_HOME/.quince/id"
+
+  # Try to start the daemon — should exit immediately with an error
+  local output
+  output=$(HOME="$ALICE_HOME" SMTP_PORT="$ALICE_PORT" POP3_PORT="$ALICE_POP3_PORT" \
+    "$BARE" "$QUINCE" start 2>&1 || true)
+
+  # Restore correct permissions for any later tests
+  chmod 600 "$ALICE_HOME/.quince/id"
+
+  if echo "$output" | grep -q "permissions"; then
+    pass "Daemon refused to start with loose private key permissions"
+    return 0
+  else
+    fail "Daemon did NOT reject loose permissions on private key"
+    echo "Output was: $output"
+    return 1
+  fi
+}
+
 #
 # Test summary
 #
@@ -388,6 +413,9 @@ main() {
 
   # Cleanup
   stop_all_daemons
+
+  # Permission enforcement tests
+  test_bad_permissions_refuses_start
 
   # Summary
   print_summary

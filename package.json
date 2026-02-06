@@ -4,6 +4,9 @@
   "type": "module",
   "private": true,
   "main": "dist/index.js",
+  "bin": {
+    "quince": "./bin/quince"
+  },
   "scripts": {
     "build": "tsc",
     "start": "./node_modules/.bin/bare dist/index.js",

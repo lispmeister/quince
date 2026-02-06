@@ -16,10 +16,15 @@ interface KeyPair {
   secretKey: Buffer
 }
 
-const IDENTITY_FILE = 'identity.json'
+const ID_FILE = 'id'
+const ID_PUB_FILE = 'id_pub'
 
 export function getIdentityPath(): string {
-  return path.join(getConfigDir(), IDENTITY_FILE)
+  return path.join(getConfigDir(), ID_FILE)
+}
+
+export function getPublicKeyPath(): string {
+  return path.join(getConfigDir(), ID_PUB_FILE)
 }
 
 export function validatePublicKey(pubkey: string): string | null {
@@ -31,58 +36,16 @@ export function validatePublicKey(pubkey: string): string | null {
   return null
 }
 
+function validateSecretKey(secretKey: string): boolean {
+  return typeof secretKey === 'string' && /^[a-f0-9]{128}$/i.test(secretKey)
+}
+
 export function generateIdentity(): Identity {
   const keyPair: KeyPair = crypto.keyPair()
   return {
     publicKey: b4a.toString(keyPair.publicKey, 'hex'),
     secretKey: b4a.toString(keyPair.secretKey, 'hex')
   }
-}
-
-export function loadIdentity(): Identity {
-  const identityPath = getIdentityPath()
-
-  try {
-    if (fs.existsSync(identityPath)) {
-      const content = fs.readFileSync(identityPath, 'utf8') as string
-      const parsed = JSON.parse(content)
-
-      // Validate loaded identity
-      const pubkeyError = validatePublicKey(parsed.publicKey)
-      if (pubkeyError) {
-        console.error(`Invalid identity file: ${pubkeyError}`)
-        console.error('Generating new identity...')
-        const identity = generateIdentity()
-        saveIdentity(identity)
-        return identity
-      }
-
-      if (!parsed.secretKey || typeof parsed.secretKey !== 'string' || !/^[a-f0-9]{128}$/i.test(parsed.secretKey)) {
-        console.error('Invalid identity file: malformed secret key')
-        console.error('Generating new identity...')
-        const identity = generateIdentity()
-        saveIdentity(identity)
-        return identity
-      }
-
-      return {
-        publicKey: parsed.publicKey.toLowerCase(),
-        secretKey: parsed.secretKey.toLowerCase()
-      }
-    }
-  } catch (err) {
-    if (err instanceof SyntaxError) {
-      console.error(`Invalid JSON in identity file ${identityPath}:`, err.message)
-    } else {
-      console.error('Failed to load identity:', err)
-    }
-    console.error('Generating new identity...')
-  }
-
-  // No identity file exists, generate new one
-  const identity = generateIdentity()
-  saveIdentity(identity)
-  return identity
 }
 
 export function saveIdentity(identity: Identity): void {
@@ -93,13 +56,80 @@ export function saveIdentity(identity: Identity): void {
   }
 
   ensureConfigDir()
-  const identityPath = getIdentityPath()
+  const idPath = getIdentityPath()
+  const pubPath = getPublicKeyPath()
 
   try {
-    fs.writeFileSync(identityPath, JSON.stringify(identity, null, 2))
+    fs.writeFileSync(idPath, identity.secretKey)
+    fs.chmodSync(idPath, 0o600)
+    fs.writeFileSync(pubPath, identity.publicKey)
   } catch (err) {
     console.error('Failed to save identity:', err)
   }
+}
+
+export function loadIdentity(): Identity {
+  const idPath = getIdentityPath()
+  const pubPath = getPublicKeyPath()
+
+  // Load from key files
+  try {
+    if (fs.existsSync(idPath) && fs.existsSync(pubPath)) {
+      const secretKey = (fs.readFileSync(idPath, 'utf8') as string).trim()
+      const publicKey = (fs.readFileSync(pubPath, 'utf8') as string).trim()
+
+      const pubErr = validatePublicKey(publicKey)
+      if (pubErr) {
+        console.error(`Invalid id_pub file: ${pubErr}`)
+        console.error('Generating new identity...')
+        const identity = generateIdentity()
+        saveIdentity(identity)
+        return identity
+      }
+
+      if (!validateSecretKey(secretKey)) {
+        console.error('Invalid id file: malformed secret key')
+        console.error('Generating new identity...')
+        const identity = generateIdentity()
+        saveIdentity(identity)
+        return identity
+      }
+
+      return {
+        publicKey: publicKey.toLowerCase(),
+        secretKey: secretKey.toLowerCase()
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load identity:', err)
+    console.error('Generating new identity...')
+  }
+
+  // No identity files exist, generate new one
+  const identity = generateIdentity()
+  saveIdentity(identity)
+  return identity
+}
+
+export function checkIdentityPermissions(): string | null {
+  const idPath = getIdentityPath()
+
+  try {
+    if (!fs.existsSync(idPath)) return null
+
+    const stat = fs.statSync(idPath)
+    const perms = stat.mode & 0o777
+
+    if (perms !== 0o600) {
+      const octal = '0' + perms.toString(8)
+      return `Private key file has permissions ${octal}, expected 0600.\n` +
+        `Fix with: chmod 600 ${idPath}`
+    }
+  } catch (err) {
+    return `Cannot check permissions on ${idPath}: ${err}`
+  }
+
+  return null
 }
 
 export function getEmailAddress(username: string, publicKey: string): string {

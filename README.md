@@ -25,29 +25,69 @@ quince bridges traditional email clients (MUAs) to a P2P transport layer. Connec
 
 ## Quick Start
 
+### 1. Install and build
+
 ```bash
-# Install and build
 bun install
 bun run build
-
-# Start the daemon
-quince start
-
-# Note your email address (printed on startup):
-#   alice@b56b17b7...quincemail.com
-
-# Add a peer
-quince add-peer bob <bob's-public-key>
-
-# Configure your mail client (see MUA Setup below)
-# Send mail to: anyone@bob.quincemail.com
+bun link
 ```
+
+This compiles the TypeScript source and puts the `quince` command in your PATH.
+
+### 2. Start the daemon
+
+```bash
+quince start
+```
+
+On first run quince generates an Ed25519 keypair at `~/.quince/id` and prints your email address:
+
+```
+Your email: alice@b56b17b7...quincemail.com
+```
+
+### 3. Exchange keys with a peer
+
+Both sides must add each other (mutual whitelist). Share your public key out-of-band, then:
+
+```bash
+quince add-peer bob <bobs-public-key>
+```
+
+Your peer does the same with your key:
+
+```bash
+quince add-peer alice <alices-public-key>
+```
+
+### 4. Configure your mail client
+
+Point your MUA at localhost using the ports quince prints on startup (defaults shown):
+
+| Protocol | Server | Port | SSL | Auth |
+|----------|--------|------|-----|------|
+| SMTP (outgoing) | `<your-pubkey>.quincemail.com` | 2525 | None | None |
+| POP3 (incoming) | `<your-pubkey>.quincemail.com` | 1110 | None | Password (any) |
+
+See [MUA Setup](#mua-setup) for Thunderbird and Apple Mail walk-throughs.
+
+### 5. Send a message
+
+Compose a message in your mail client addressed to:
+
+```
+anyone@bob.quincemail.com
+```
+
+quince signs the message with your Ed25519 key and delivers it over Hyperswarm. If the peer is offline, the message is queued and retried automatically.
 
 ## Installation
 
 ```bash
 bun install
 bun run build
+bun link          # makes 'quince' available in your PATH
 ```
 
 ## Identity
@@ -55,12 +95,13 @@ bun run build
 Each quince daemon has a unique Ed25519 keypair generated on first run:
 
 ```
-~/.quince/identity.json
+~/.quince/id        # secret key (mode 0600)
+~/.quince/id_pub    # public key (safe to share)
 ```
 
 Your email address is derived from your public key: `<user>@<pubkey>.quincemail.com`
 
-**Protect your identity file** — anyone with access can read and send messages as you.
+**Protect your private key file** — anyone with access can read and send messages as you. quince refuses to start if `~/.quince/id` has permissions other than `0600`.
 
 ## DNS Setup
 
@@ -205,7 +246,8 @@ Spins up two full daemon instances (ALICE and BOB) with Hyperswarm to test real 
 
 ```
 ~/.quince/
-  identity.json   # Your Ed25519 keypair (keep secret!)
+  id              # Ed25519 secret key (mode 0600 — keep secret!)
+  id_pub          # Ed25519 public key (safe to share)
   config.json     # Daemon configuration
   inbox/          # Received messages (.eml) and index
   queue/          # Outbound message queue

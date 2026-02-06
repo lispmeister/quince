@@ -5,6 +5,8 @@ declare module 'bare-fs' {
   export function mkdirSync(path: string, options?: { recursive?: boolean }): void
   export function readdirSync(path: string): string[]
   export function unlinkSync(path: string): void
+  export function chmodSync(path: string, mode: number): void
+  export function statSync(path: string): { mode: number }
 }
 
 declare module 'bare-path' {

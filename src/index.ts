@@ -18,9 +18,11 @@ import { MessageQueue, type QueuedMessage } from './queue/index.js'
 import {
   loadIdentity,
   getIdentityPath,
+  getPublicKeyPath,
   getEmailAddress,
   parseEmailDomain,
   validatePublicKey,
+  checkIdentityPermissions,
   EMAIL_DOMAIN
 } from './identity.js'
 import { signMessage, verifyMessage } from './crypto.js'
@@ -75,7 +77,8 @@ async function showIdentity(): Promise<void> {
   console.log(`  Email address: ${emailAddr}`)
   console.log('')
   console.log(`  Public key: ${identity.publicKey}`)
-  console.log(`  Identity file: ${getIdentityPath()}`)
+  console.log(`  Private key: ${getIdentityPath()}`)
+  console.log(`  Public key file: ${getPublicKeyPath()}`)
   console.log('')
   console.log('Share your email address with correspondents.')
   console.log(`They can send mail to: ${emailAddr}`)
@@ -150,7 +153,8 @@ async function showConfig(): Promise<void> {
   const peerCount = Object.keys(config.peers ?? {}).length
   console.log('Current configuration:')
   console.log(`  Config file: ${getConfigPath()}`)
-  console.log(`  Identity file: ${getIdentityPath()}`)
+  console.log(`  Private key: ${getIdentityPath()}`)
+  console.log(`  Public key: ${getPublicKeyPath()}`)
   console.log(`  Username: ${config.username ?? '(not set, using env or default)'}`)
   console.log(`  SMTP port: ${config.smtpPort ?? '(not set, using env or default)'}`)
   console.log(`  Peers: ${peerCount}`)
@@ -272,6 +276,12 @@ function resolveRecipient(to: string): { pubkey: string; display: string } | nul
 }
 
 async function startDaemon(): Promise<void> {
+  const permError = checkIdentityPermissions()
+  if (permError) {
+    console.error('ERROR: ' + permError)
+    process.exit(1)
+  }
+
   const emailAddr = getEmailAddress(LOCAL_USER, identity.publicKey)
   const peers = config.peers ?? {}
   const peerCount = Object.keys(peers).length
