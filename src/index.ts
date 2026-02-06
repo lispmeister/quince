@@ -24,6 +24,7 @@ import {
   EMAIL_DOMAIN
 } from './identity.js'
 import { signMessage, verifyMessage } from './crypto.js'
+import { storeMessage, listMessages, getInboxPath } from './inbox.js'
 
 let config = loadConfig()
 const identity = loadIdentity()
@@ -47,6 +48,7 @@ Commands:
   add-peer <alias> <pubkey>     Add a peer with friendly alias
   remove-peer <alias>           Remove a peer
   config                        Show current configuration
+  inbox                         List received messages
   queue                         Show queued messages
   queue clear                   Clear all queued messages
   help                          Show this help message
@@ -199,6 +201,34 @@ async function clearQueue(): Promise<void> {
   queue.destroy()
 }
 
+async function showInbox(): Promise<void> {
+  const messages = listMessages()
+
+  if (messages.length === 0) {
+    console.log('Inbox is empty.')
+    console.log(`  Inbox path: ${getInboxPath()}`)
+    return
+  }
+
+  console.log(`Inbox: ${messages.length} message(s)`)
+  console.log(`  Path: ${getInboxPath()}`)
+  console.log('')
+
+  for (const msg of messages) {
+    const date = new Date(msg.receivedAt).toISOString()
+    const sigStatus = msg.signatureValid ? 'OK' : 'FAILED'
+    const alias = getPeerAlias(config, msg.senderPubkey)
+    const sender = alias ?? msg.senderPubkey.slice(0, 16) + '...'
+
+    console.log(`  ${msg.file}`)
+    console.log(`    From: ${msg.from}`)
+    console.log(`    Subject: ${msg.subject || '(none)'}`)
+    console.log(`    Sender: ${sender}  Signature: ${sigStatus}`)
+    console.log(`    Received: ${date}`)
+    console.log('')
+  }
+}
+
 // Resolve recipient address to pubkey
 function resolveRecipient(to: string): { pubkey: string; display: string } | null {
   const parsed = parseEmailDomain(to)
@@ -337,6 +367,10 @@ async function startDaemon(): Promise<void> {
       if (!valid) {
         console.log('WARNING: Signature verification failed')
       }
+
+      // Store to inbox
+      const entry = storeMessage(msg.id, mime, senderPubkey, valid)
+      console.log(`Stored: ${entry.file}${valid ? '' : ' (UNVERIFIED)'}`)
 
       console.log(mime)
       console.log('------------------------')
@@ -517,6 +551,10 @@ async function main(): Promise<void> {
       } else {
         await showQueue()
       }
+      break
+
+    case 'inbox':
+      await showInbox()
       break
 
     case 'help':
