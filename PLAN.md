@@ -48,8 +48,8 @@ quince addresses this by using Pear's Hyperswarm for peer discovery and encrypte
 - [x] Delivery confirmation (ACK) from receiving daemon
 - [x] Outbound queue with exponential backoff retry for offline recipients
 - [x] Automatic peer discovery when sending to new recipients
-- [ ] Integration test: two daemon instances, simulated MUA send, verify receipt
-- [ ] Message authentication: X-Quince-Signature header (BLAKE2b body hash, Ed25519 signed)
+- [x] Integration test: two daemon instances, simulated MUA send, verify receipt
+- [x] Message authentication: X-Quince-Signature header (BLAKE2b body hash, Ed25519 signed)
 
 ### Out of Scope (Future Phases)
 
@@ -332,7 +332,7 @@ quince help                       # Show help
 - Configuration validation
 - CLI for daemon and peer management
 
-### M6: Message Authentication
+### M6: Message Authentication ✓
 - BLAKE2b hash of MIME body
 - Ed25519 signature using sender's secret key
 - `X-Quince-Signature` header injected into outbound MIME
