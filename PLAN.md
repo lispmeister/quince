@@ -1,38 +1,45 @@
 # quince
 
-Decentralized SMTP MTA over the Pear P2P network.
+Agent-first SMTP MTA over the Pear P2P network.
 
 ## Overview
 
-quince is a daemon that bridges traditional email clients (MUAs) to a decentralized P2P transport layer. Users connect their mail client to localhost via standard SMTP, and quince delivers messages to recipients over encrypted Pear network channels.
+quince is an agent-first mail transfer agent. Autonomous AI agents need strong authentication, non-repudiation, high-bandwidth file transfer, and privacy. Traditional email provides none of that. Quince does — over a decentralized P2P transport with cryptographic identities.
+
+Agents connect via standard SMTP and POP3 (or the local HTTP API) on localhost. Quince handles signing, verification, encryption, peer discovery, file transfer, and retry. Any agent that can send email — Python's `smtplib`, Node's `nodemailer`, or plain `curl` — can participate in a cryptographically authenticated P2P network. Humans with standard mail clients work too.
 
 ## Problem Statement
 
-Current email infrastructure is:
-- Centralized (dependent on major providers)
-- Lacks true end-to-end encryption
-- Has no native digital identity for users
+Autonomous agents need infrastructure for secure, private, peer-to-peer communication:
+- **Authentication** — prove who sent a message, cryptographically
+- **Non-repudiation** — digital signatures that can't be forged or denied
+- **Privacy** — encrypted transport, mutual whitelist, no central servers
+- **File transfer** — large artifacts (datasets, outputs) without MIME overhead
+- **Discovery** — find and establish trust with new agents programmatically
 
-quince addresses this by using Pear's Hyperswarm for peer discovery and encrypted transport, with cryptographic identities replacing DNS-based addressing.
+Current email infrastructure fails on all five. Quince addresses this using Pear's Hyperswarm for peer discovery and encrypted transport, Ed25519 keypairs for identity and signatures, and Hyperdrive for chunked, verified file transfer.
 
 ## Architecture
 
 ```
 ┌─────────┐    SMTP     ┌──────────────┐   Hyperswarm   ┌──────────────┐
-│   MUA   │ ──────────► │ quince A     │ ◄────────────► │ quince B     │ ──► file
-└─────────┘  localhost  │  (pubkey A)  │   (encrypted)  │  (pubkey B)  │
-                        └──────────────┘                └──────────────┘
-                              │                              │
-                         identity.json                  identity.json
-                         (Ed25519 keypair)              (Ed25519 keypair)
+│  Agent  │ ──────────► │ quince A     │ ◄────────────► │ quince B     │ ──► file
+│  or MUA │  localhost  │  (pubkey A)  │   (encrypted)  │  (pubkey B)  │
+└─────────┘             └──────────────┘                └──────────────┘
+     │  POP3 / HTTP API       │                              │
+     └────────────────────────┘                         identity
+                                                   (Ed25519 keypair)
 ```
 
 ### Components
 
-1. **SMTP Server** - Listens on localhost, accepts mail from MUAs
-2. **Pear Transport** - Hyperswarm with pubkey-based peer discovery
-3. **Message Store** - Received messages written to local files
-4. **Peer Registry** - Maps friendly aliases to recipient public keys
+1. **SMTP Server** - Listens on localhost, accepts mail from agents and MUAs
+2. **POP3 Server** - Inbox retrieval for MUA clients
+3. **HTTP API** - Agent-native inbox query, send, peer status, file transfers
+4. **Pear Transport** - Hyperswarm with pubkey-based peer discovery
+5. **File Transfer** - Hyperdrive for chunked, verified P2P file transfer
+6. **Message Store** - Received messages written to local files
+7. **Peer Registry** - Maps friendly aliases to recipient public keys
 
 ## MVP Scope
 
@@ -55,13 +62,11 @@ quince addresses this by using Pear's Hyperswarm for peer discovery and encrypte
 
 - Message body encryption (transport encryption sufficient for point-to-point)
 - KEET identity integration and derived keys
-- Blind pairing for trust establishment
 - Bounce messages for rejected senders (see Whitelist Mode below)
 - LMTP handoff to Postfix
-- IMAP server for retrieval (see DNS Strategy below)
-- SMTP extensions (AUTH, STARTTLS, SIZE, 8BITMIME)
-- Multi-recipient delivery
-- Inbox file storage
+- IMAP server for retrieval (HTTP API covers agent use case; IMAP for MUA power users only)
+- SMTP AUTH / STARTTLS (only needed if binding to non-localhost)
+- Pub/sub topics (can be built on multi-recipient + introductions later)
 
 ## Technical Decisions
 
@@ -372,17 +377,88 @@ quince help                       # Show help
 - CLI: `quince transfers` — list active/pending transfers
 - Integration tests: pull protocol flow, drive reuse, file dedup
 
-### M11: Media HTTP Server
-- Local HTTP server serving `~/.quince/media/` for clickable links in MUAs
-- Receiver-side emails contain `http://127.0.0.1:PORT/media/<sender>/<file>`
+### M11: Agent HTTP API
+**Spec: [AGENT-FIRST-PROPOSAL.md](./AGENT-FIRST-PROPOSAL.md)**
+
+Local HTTP server on localhost — the agent-native interface to quince. Subsumes the media HTTP server.
+
+**Inbox query & management:**
+- `GET /api/inbox` — list messages (paginated)
+- `GET /api/inbox?from=<pubkey>` — filter by sender
+- `GET /api/inbox?after=<timestamp>` — messages since timestamp
+- `GET /api/inbox?subject=<text>` — substring match on subject
+- `GET /api/inbox?q=<text>` — full-text search across body
+- `GET /api/inbox?type=<message-type>` — filter by `X-Quince-Message-Type`
+- `GET /api/inbox?thread=<message-id>` — conversation threading
+- `GET /api/inbox/:id` — get single message (headers + body)
+- `GET /api/inbox/:id/raw` — raw .eml
+- `DELETE /api/inbox/:id` — delete message
+
+**Send (bypasses SMTP for agents):**
+- `POST /api/send` — send a message (JSON body)
+  - Supports `contentType`, `inReplyTo`, `messageType` fields
+
+**Peers & status:**
+- `GET /api/peers` — list peers with online status and capabilities
+- `GET /api/peers/:pubkey/status` — peer presence
+- `GET /api/identity` — this daemon's pubkey and address
+- `GET /api/transfers` — file transfer status
+
+**Media server (for MUA clickable links):**
+- Serve `~/.quince/media/` over HTTP for clickable links in MUAs
 - Transfer status page: progress/ETA while transferring, file content when complete
-- Single URL that works at every stage — check progress early, open file later
 - UI shows sender alias (from config.peers) for media directories, not raw pubkey
+
+**Structured message types:**
+- Index `Content-Type`, `X-Quince-Message-Type`, `In-Reply-To`, `References` headers
+- Conversation threading via standard email headers (`Message-ID`, `In-Reply-To`, `References`)
+- Agents filter inbox by message type without downloading everything
+
+### M12: Agent Discovery
+**Spec: [AGENT-FIRST-PROPOSAL.md](./AGENT-FIRST-PROPOSAL.md)**
+
+Reduce onboarding friction — agents can discover peers and establish trust programmatically.
+
+**Capability profiles:**
+- Extend IDENTIFY handshake with optional capabilities (name, version, accepted message types)
+- Store capabilities in memory alongside peer connection state
+- Expose via `GET /api/peers` — agents check what peers can do before sending
+
+**Peer presence & status:**
+- New STATUS packet type: `available` | `busy` | `away` with optional message
+- Agents check availability before sending time-sensitive requests
+
+**Trusted introductions:**
+- New INTRODUCTION packet: peer A introduces peer C to peer B with a signed voucher
+- Config: `trustIntroductions: { "alice": true }` — auto-accept introductions from Alice
+- CLI: `quince introductions` — list pending introductions for manual approval
+- Cryptographic: introduction block is signed by the introducer's Ed25519 key
+
+### M13: Multi-Agent Coordination
+**Spec: [AGENT-FIRST-PROPOSAL.md](./AGENT-FIRST-PROPOSAL.md)**
+
+Enable one-to-many messaging and richer delivery semantics.
+
+**Multi-recipient delivery:**
+- Support multiple `RCPT TO` in SMTP session
+- Independent delivery to each recipient over Hyperswarm
+- Partial failure handling (some offline, some not whitelisted)
+- HTTP API: `POST /api/send` with `to: [<pubkey1>, <pubkey2>]`
+
+**Processing receipts (convention):**
+- `X-Quince-Processing-Status: completed | failed | in-progress`
+- `X-Quince-Processing-Duration: <ms>`
+- Indexed and queryable via inbox API
+- Agent convention, not enforced by quince
 
 ### Future Enhancements
 - TLS support (only needed if binding to non-localhost)
 - MUA auto-configuration / autoconfig XML
-- IMAP4 server (folders, read/unread flags, multi-device sync)
+- IMAP4 server (folders, read/unread flags, multi-device sync — for MUA power users)
 - SMTP AUTH for multi-user scenarios
+- Message body encryption (for at-rest protection on compromised hosts)
+- Pub/sub topics (built on multi-recipient + introductions)
+- Per-peer rate limiting and backpressure
 - Sent folder synchronization
 - Contact/alias synchronization across devices
+- Global agent registry (optional, separate service — not core protocol)
