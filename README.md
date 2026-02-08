@@ -194,6 +194,51 @@ Then Alice can send to `anyone@bob.quincemail.com` and Bob can send to `anyone@a
 
 The server hostname resolves to `127.0.0.1` via the wildcard DNS record.
 
+## File Transfer
+
+quince supports P2P file transfer via Hyperdrive. Files never enter the SMTP pipeline — they transfer directly between peers, chunked, verified, and resumable.
+
+### Sending a file
+
+1. Drop the file into `~/.quince/media/`:
+
+```bash
+cp ~/Photos/photo.jpg ~/.quince/media/
+```
+
+2. Reference it in your email body using a `quince:/media/` URI:
+
+```
+Hey Bob, check out this photo: quince:/media/photo.jpg
+```
+
+3. Send the email from your MUA as usual.
+
+quince validates that the file exists (rejecting the email with a `550` if not), delivers the text message immediately, then transfers the file in the background over Hyperdrive.
+
+### Receiving a file
+
+Files arrive automatically in `~/.quince/media/<sender-alias>/`:
+
+```
+~/.quince/media/alice/photo.jpg
+```
+
+The email in your inbox is rewritten to show the local path:
+
+```
+Hey Bob, check out this photo: [photo.jpg — 10.0 MB] → ~/.quince/media/alice/photo.jpg
+```
+
+The text arrives instantly. The file may take longer depending on size and connection. Use `quince transfers` to check progress.
+
+### Checking transfer status
+
+```bash
+quince transfers          # show active/pending transfers
+quince transfers --all    # include completed transfers
+```
+
 ## Message Authentication
 
 Outbound messages are signed with your Ed25519 key. The signature is a BLAKE2b hash of the message body, signed and injected as an `X-Quince-Signature` header. Recipients verify the signature automatically — a warning is logged if verification fails.
@@ -211,6 +256,8 @@ Outbound messages are signed with your Ed25519 key. The signature is a BLAKE2b h
 | `quince inbox` | List received messages |
 | `quince queue` | Show queued messages |
 | `quince queue clear` | Clear message queue |
+| `quince transfers` | Show active file transfers |
+| `quince transfers --all` | Show all transfers (including completed) |
 
 ## Environment Variables
 
@@ -251,6 +298,10 @@ Spins up two full daemon instances (ALICE and BOB) with Hyperswarm to test real 
   config.json     # Daemon configuration
   inbox/          # Received messages (.eml) and index
   queue/          # Outbound message queue
+  media/          # Files for sending (user-managed)
+  media/<alias>/  # Received files (per-sender)
+  drives/         # Hyperdrive storage (Corestore internals)
+  transfers.json  # File transfer state
 ```
 
 ## License

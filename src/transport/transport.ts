@@ -1,7 +1,7 @@
 import { EventEmitter } from 'bare-events'
 import Hyperswarm, { type Peer, type PeerInfo, type Discovery } from 'hyperswarm'
 import b4a from 'b4a'
-import type { PeerPacket, PeerMessage, PeerAck, PeerIdentify } from './types.js'
+import type { PeerPacket, PeerMessage, PeerAck, PeerIdentify, PeerFileOffer, PeerFileRequest, PeerFileComplete } from './types.js'
 import type { Identity } from '../identity.js'
 
 export interface TransportConfig {
@@ -135,6 +135,19 @@ export class Transport extends EventEmitter {
         this.pendingAcks.delete(packet.id)
         pending.resolve()
       }
+    } else if (packet.type === 'FILE_OFFER' || packet.type === 'FILE_REQUEST' || packet.type === 'FILE_COMPLETE') {
+      if (!conn.identityPubkey) {
+        console.error(`Received ${packet.type} before IDENTIFY`)
+        return
+      }
+      if (this.config.whitelist && !this.config.whitelist.has(conn.identityPubkey)) {
+        console.log(`${packet.type} rejected (sender not on whitelist): ${conn.identityPubkey.slice(0, 16)}...`)
+        return
+      }
+      const eventName = packet.type === 'FILE_OFFER' ? 'file-offer'
+        : packet.type === 'FILE_REQUEST' ? 'file-request'
+        : 'file-complete'
+      this.emit(eventName, packet, conn.identityPubkey)
     }
   }
 
@@ -240,6 +253,33 @@ export class Transport extends EventEmitter {
 
     const line = JSON.stringify(packet) + '\n'
     peer.write(line)
+  }
+
+  sendFileOffer(recipientPubkey: string, offer: PeerFileOffer): void {
+    const peer = this.peersByIdentity.get(recipientPubkey)
+    if (!peer) {
+      console.error(`Cannot send FILE_OFFER, peer not connected: ${recipientPubkey.slice(0, 16)}...`)
+      return
+    }
+    peer.write(JSON.stringify(offer) + '\n')
+  }
+
+  sendFileRequest(recipientPubkey: string, request: PeerFileRequest): void {
+    const peer = this.peersByIdentity.get(recipientPubkey)
+    if (!peer) {
+      console.error(`Cannot send FILE_REQUEST, peer not connected: ${recipientPubkey.slice(0, 16)}...`)
+      return
+    }
+    peer.write(JSON.stringify(request) + '\n')
+  }
+
+  sendFileComplete(recipientPubkey: string, complete: PeerFileComplete): void {
+    const peer = this.peersByIdentity.get(recipientPubkey)
+    if (!peer) {
+      console.error(`Cannot send FILE_COMPLETE, peer not connected: ${recipientPubkey.slice(0, 16)}...`)
+      return
+    }
+    peer.write(JSON.stringify(complete) + '\n')
   }
 
   getPeer(pubkey: string): Peer | undefined {

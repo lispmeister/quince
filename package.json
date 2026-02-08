@@ -29,7 +29,9 @@
     "bare-path": "^3.0.0",
     "bare-process": "^4.2.2",
     "bare-tcp": "^2.2.2",
+    "corestore": "^7.8.0",
     "hypercore-crypto": "^3.6.1",
+    "hyperdrive": "^13.2.1",
     "hyperswarm": "^4.16.0"
   }
 }

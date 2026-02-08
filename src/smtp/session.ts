@@ -5,6 +5,7 @@ export interface SmtpSessionConfig {
   hostname: string
   localUser: string
   onMessage: (from: string, to: string, data: string) => Promise<void>
+  validateData?: (from: string, to: string, data: string) => string | null
 }
 
 export class SmtpSession {
@@ -137,10 +138,20 @@ export class SmtpSession {
     const data = this.dataBuffer.join('\r\n')
     this.transaction.data = data
 
-    // Trigger message delivery (async, but we respond immediately for MVP)
     const from = this.transaction.from ?? ''
     const to = this.transaction.to ?? ''
 
+    // Validate data before accepting
+    if (this.config.validateData) {
+      const rejection = this.config.validateData(from, to, data)
+      if (rejection) {
+        this.state = 'READY'
+        this.resetTransaction()
+        return rejection
+      }
+    }
+
+    // Trigger message delivery (async, but we respond immediately for MVP)
     this.config.onMessage(from, to, data).catch((err) => {
       console.error('Message delivery failed:', err)
     })

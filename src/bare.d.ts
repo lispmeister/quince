@@ -6,7 +6,7 @@ declare module 'bare-fs' {
   export function readdirSync(path: string): string[]
   export function unlinkSync(path: string): void
   export function chmodSync(path: string, mode: number): void
-  export function statSync(path: string): { mode: number }
+  export function statSync(path: string): { mode: number; size: number }
 }
 
 declare module 'bare-path' {
@@ -85,6 +85,7 @@ declare module 'hyperswarm' {
     join(topic: Buffer, options?: JoinOptions): Discovery
     leave(topic: Buffer): Promise<void>
     destroy(): Promise<void>
+    flush(): Promise<void>
     on(event: 'connection', handler: (peer: Peer, info: PeerInfo) => void): this
     on(event: 'error', handler: (err: Error) => void): this
   }
@@ -106,6 +107,52 @@ declare module 'b4a' {
   export function from(data: string | Buffer, encoding?: string): Buffer
   export function alloc(size: number): Buffer
   export function isBuffer(obj: unknown): obj is Buffer
+}
+
+declare module 'corestore' {
+  import { EventEmitter } from 'bare-events'
+
+  class Corestore extends EventEmitter {
+    constructor(storage: string)
+    ready(): Promise<void>
+    replicate(stream: any): any
+    namespace(name: string): Corestore
+    close(): Promise<void>
+  }
+
+  export default Corestore
+}
+
+declare module 'hyperdrive' {
+  import { EventEmitter } from 'bare-events'
+  import Corestore from 'corestore'
+
+  interface HyperdriveEntry {
+    key: string
+    value: {
+      blob: { blockOffset: number; blockLength: number; byteOffset: number; byteLength: number }
+      executable: boolean
+      linkname: string | null
+      metadata: any
+    }
+    seq: number
+  }
+
+  class Hyperdrive extends EventEmitter {
+    constructor(store: Corestore, key?: Buffer | null)
+    ready(): Promise<void>
+    put(path: string, data: Buffer): Promise<void>
+    get(path: string): Promise<Buffer | null>
+    entry(path: string): Promise<HyperdriveEntry | null>
+    del(path: string): Promise<void>
+    clear(path: string): Promise<void>
+    close(): Promise<void>
+    key: Buffer
+    discoveryKey: Buffer
+    findingPeers(): () => void
+  }
+
+  export default Hyperdrive
 }
 
 declare module 'bare-tcp' {
