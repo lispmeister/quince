@@ -357,19 +357,19 @@ quince help                       # Show help
 - MUA configuration guide (Thunderbird, Apple Mail)
 - README overhaul: complete setup walkthrough (identity, peers, DNS, MUA config)
 
-### M10: P2P File Transfer via Hyperdrive
+### M10: P2P File Transfer via Hyperdrive ✓
 **Spec: [HYPERSWARM-TRANSFER-PROTOCOL.md](./HYPERSWARM-TRANSFER-PROTOCOL.md)**
 - `quince:/media/<filename>` URI scheme for file references in email body
 - User drops files in `~/.quince/media/`, references them in emails
-- Quince detects references, validates files, initiates Hyperdrive transfer
-- FILE_OFFER / FILE_ACCEPT / FILE_COMPLETE negotiation protocol
-- Per-peer Hyperdrive isolation (sender→receiver privacy)
+- Pull-based protocol: receiver sends FILE_REQUEST, sender responds with FILE_OFFER
+- Message held on receiver until files arrive (5-min timeout with failure markers)
+- Per-peer Hyperdrive isolation (sender→receiver privacy), drive caching by pubkey
 - Second Hyperswarm for Corestore replication (separate from messaging swarm)
-- Async file transfer queue with progress tracking
-- Receiver-side: files land in `~/.quince/media/<sender>/`
-- Receiver-side: `quince://` references transformed to local paths in .eml
-- CLI: `quince transfers` — list active/pending transfers with progress
-- Integration test: send email with file reference, verify file arrives at receiver
+- Cleanup: `drive.clear()` for disk space, `swarm.leave()` for DHT announcements
+- Receiver-side: files land in `~/.quince/media/<sender>/`, deduplicated on name collision
+- Receiver-side: `quince://` references transformed to local paths with real file sizes in .eml
+- CLI: `quince transfers` — list active/pending transfers
+- Integration tests: pull protocol flow, drive reuse, file dedup
 
 ### M11: Media HTTP Server
 - Local HTTP server serving `~/.quince/media/` for clickable links in MUAs

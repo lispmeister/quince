@@ -390,3 +390,9 @@ The .eml always reflects the actual filename on disk. The original `quince:/medi
 ```
 [photo-1.jpg — 10.2 MB] → ~/.quince/media/alice/photo-1.jpg
 ```
+
+### Dedup Test Gaps
+
+- [ ] **Third send of same filename** — send `test.txt` three times to the same peer, verify `test.txt`, `test-1.txt`, `test-2.txt` all exist with correct content
+- [ ] **Mixed rename in single transfer** — message with two file refs where one filename already exists on receiver and the other doesn't; verify only the collision gets renamed, .eml has correct paths for both
+- [ ] **Near-simultaneous messages with same filename** — two messages referencing the same filename arriving close together; verify both files saved with distinct names (no overwrite race)
