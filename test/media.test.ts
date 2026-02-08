@@ -77,6 +77,16 @@ function transformFileRefs(
   return result
 }
 
+function transformFileRefsFailed(body: string, fileNames: string[]): string {
+  let result = body
+  for (const name of fileNames) {
+    const uri = `quince:/media/${name}`
+    const replacement = `[${name} — transfer failed]`
+    result = result.split(uri).join(replacement)
+  }
+  return result
+}
+
 // --- Tests ---
 
 describe('parseFileRefs', () => {
@@ -182,5 +192,27 @@ describe('transformFileRefs', () => {
     const body = 'quince:/media/tiny.txt'
     const result = transformFileRefs(body, 'alice', [{ name: 'tiny.txt', size: 512 }])
     expect(result).toContain('512 B')
+  })
+})
+
+describe('transformFileRefsFailed', () => {
+  test('replaces single ref with failure marker', () => {
+    const body = 'See: quince:/media/photo.jpg done'
+    const result = transformFileRefsFailed(body, ['photo.jpg'])
+    expect(result).toBe('See: [photo.jpg — transfer failed] done')
+  })
+
+  test('replaces multiple refs with failure markers', () => {
+    const body = 'quince:/media/a.jpg and quince:/media/b.pdf'
+    const result = transformFileRefsFailed(body, ['a.jpg', 'b.pdf'])
+    expect(result).toContain('[a.jpg — transfer failed]')
+    expect(result).toContain('[b.pdf — transfer failed]')
+    expect(result).not.toContain('quince:/media/')
+  })
+
+  test('leaves body unchanged for unmatched file names', () => {
+    const body = 'quince:/media/photo.jpg'
+    const result = transformFileRefsFailed(body, ['other.jpg'])
+    expect(result).toBe('quince:/media/photo.jpg')
   })
 })

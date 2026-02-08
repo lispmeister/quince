@@ -32,8 +32,9 @@ import { signMessage, verifyMessage } from './crypto.js'
 import { storeMessage, listMessages, getMessageContent, deleteMessage, getInboxPath } from './inbox.js'
 import { Pop3Server } from './pop3/index.js'
 import { FileTransferManager } from './transfer/index.js'
-import type { PeerFileOffer, PeerFileAccept, PeerFileComplete } from './transport/index.js'
-import { parseFileRefs, validateFileRefs, transformFileRefs, ensureMediaDirs } from './media.js'
+import type { PeerFileOffer, PeerFileRequest, PeerFileComplete } from './transport/index.js'
+import type { PendingMessage } from './transfer/index.js'
+import { parseFileRefs, validateFileRefs, transformFileRefs, transformFileRefsFailed, ensureMediaDirs } from './media.js'
 
 let config = loadConfig()
 const identity = loadIdentity()
@@ -477,26 +478,37 @@ async function startDaemon(): Promise<void> {
         console.log('WARNING: Signature verification failed')
       }
 
-      // Transform file refs to local paths before storing
-      let storedMime = mime
+      // Send ACK back to sender (transport-level receipt)
+      transport.sendAck(senderPubkey, msg.id)
+
+      // Check for file refs — if present, hold the message until files arrive
       const refs = parseFileRefs(mime)
       if (refs.length > 0 && alias) {
-        // We don't know file sizes yet (offer hasn't arrived), use 0 as placeholder
-        const fileInfo = refs.map(r => ({ name: r.name, size: 0 }))
-        storedMime = transformFileRefs(mime, alias, fileInfo)
-        ensureMediaDirs(alias)
-        console.log(`Transformed ${refs.length} file ref(s) to local paths`)
+        console.log(`Message has ${refs.length} file ref(s), holding for transfer...`)
+        transferManager.addPendingMessage({
+          messageId: msg.id,
+          mime,
+          senderPubkey,
+          senderAlias: alias,
+          signatureValid: valid,
+          refs,
+          receivedAt: Date.now()
+        })
+        transport.sendFileRequest(senderPubkey, {
+          type: 'FILE_REQUEST',
+          messageId: msg.id,
+          files: refs.map(r => ({ name: r.name }))
+        })
+        console.log(`Sent FILE_REQUEST for ${refs.length} file(s) to ${display}`)
+        return
       }
 
-      // Store to inbox
-      const entry = storeMessage(msg.id, storedMime, senderPubkey, valid)
+      // No file refs — deliver immediately
+      const entry = storeMessage(msg.id, mime, senderPubkey, valid)
       console.log(`Stored: ${entry.file}${valid ? '' : ' (UNVERIFIED)'}`)
 
       console.log(mime)
       console.log('------------------------')
-
-      // Send ACK back to sender
-      transport.sendAck(senderPubkey, msg.id)
     } catch (err) {
       console.error('Failed to process message:', err)
     }
@@ -527,33 +539,65 @@ async function startDaemon(): Promise<void> {
   })
 
   // File transfer events
+
+  // Sender: receiver is requesting files
+  transport.on('file-request', async (request: PeerFileRequest, senderPubkey: string) => {
+    const alias = getPeerAlias(config, senderPubkey) ?? senderPubkey.slice(0, 16)
+    console.log(`Received FILE_REQUEST from ${alias} for ${request.files.length} file(s)`)
+
+    try {
+      const offer = await transferManager.handleFileRequest(request.messageId, senderPubkey, request.files)
+      transport.sendFileOffer(senderPubkey, offer)
+      console.log(`Sent FILE_OFFER to ${alias} for ${offer.files.length} file(s)`)
+    } catch (err) {
+      console.error('Failed to handle file request:', err)
+    }
+  })
+
+  // Receiver: sender is offering files (after our FILE_REQUEST)
   transport.on('file-offer', async (offer: PeerFileOffer, senderPubkey: string) => {
     const alias = getPeerAlias(config, senderPubkey) ?? senderPubkey.slice(0, 16)
     console.log(`Received FILE_OFFER from ${alias} for ${offer.files.length} file(s)`)
-
-    // Auto-accept from whitelisted peers
-    transport.sendFileAccept(senderPubkey, { type: 'FILE_ACCEPT', messageId: offer.messageId })
-    console.log(`Sent FILE_ACCEPT to ${alias}`)
-
     await transferManager.handleFileOffer(offer, senderPubkey, alias)
   })
 
-  transport.on('file-accept', (_accept: PeerFileAccept, senderPubkey: string) => {
-    const alias = getPeerAlias(config, senderPubkey) ?? senderPubkey.slice(0, 16)
-    console.log(`Received FILE_ACCEPT from ${alias}`)
-  })
-
-  transport.on('file-complete', (complete: PeerFileComplete, senderPubkey: string) => {
+  // Sender: receiver confirms transfer complete, clean up
+  transport.on('file-complete', async (complete: PeerFileComplete, senderPubkey: string) => {
     const alias = getPeerAlias(config, senderPubkey) ?? senderPubkey.slice(0, 16)
     console.log(`Received FILE_COMPLETE from ${alias} for message ${complete.messageId.slice(0, 8)}...`)
-    transferManager.markComplete(complete.messageId, 'send')
+    await transferManager.cleanup(complete.messageId, 'send')
   })
 
-  // When we finish receiving files, send FILE_COMPLETE to sender
-  transferManager.on('transfer-complete', (messageId: string, senderPubkey: string) => {
-    const alias = getPeerAlias(config, senderPubkey) ?? senderPubkey.slice(0, 16)
-    console.log(`File transfer complete from ${alias}, sending FILE_COMPLETE`)
-    transport.sendFileComplete(senderPubkey, { type: 'FILE_COMPLETE', messageId })
+  // Receiver: files downloaded — deliver pending message to inbox
+  transferManager.on('transfer-complete', async (event: { messageId: string; senderPubkey: string; files: Array<{ name: string; size: number }> }) => {
+    const pending = transferManager.getPendingMessage(event.messageId)
+    if (!pending) {
+      console.error(`No pending message for completed transfer ${event.messageId.slice(0, 8)}...`)
+      return
+    }
+
+    const display = pending.senderAlias
+    console.log(`File transfer complete from ${display}, delivering message to inbox`)
+
+    // Transform file refs with real sizes
+    const storedMime = transformFileRefs(pending.mime, pending.senderAlias, event.files)
+    const entry = storeMessage(pending.messageId, storedMime, pending.senderPubkey, pending.signatureValid)
+    console.log(`Stored: ${entry.file}${pending.signatureValid ? '' : ' (UNVERIFIED)'}`)
+
+    transferManager.removePendingMessage(event.messageId)
+    transport.sendFileComplete(pending.senderPubkey, { type: 'FILE_COMPLETE', messageId: event.messageId })
+
+    await transferManager.cleanup(event.messageId, 'receive')
+  })
+
+  // Receiver: file transfer timed out — deliver message with failure markers
+  transferManager.on('transfer-timeout', (pending: PendingMessage) => {
+    const display = pending.senderAlias
+    console.log(`File transfer timeout from ${display}, delivering with failure markers`)
+
+    const fileNames = pending.refs.map(r => r.name)
+    const storedMime = transformFileRefsFailed(pending.mime, fileNames)
+    storeMessage(pending.messageId, storedMime, pending.senderPubkey, pending.signatureValid)
   })
 
   // SMTP message handler
@@ -584,18 +628,6 @@ async function startDaemon(): Promise<void> {
         mime: encoded
       })
       console.log(`Queued for retry`)
-    }
-
-    // Check for file references and initiate transfer
-    const refs = parseFileRefs(data)
-    if (refs.length > 0 && success) {
-      try {
-        const offer = await transferManager.prepareSend(messageId, recipient.pubkey, refs)
-        transport.sendFileOffer(recipient.pubkey, offer)
-        console.log(`Sent FILE_OFFER for ${refs.length} file(s) to ${recipient.display}`)
-      } catch (err) {
-        console.error('Failed to prepare file transfer:', err)
-      }
     }
   }
 

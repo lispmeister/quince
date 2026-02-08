@@ -27,9 +27,10 @@ export interface PeerFileOffer {
   }>
 }
 
-export interface PeerFileAccept {
-  type: 'FILE_ACCEPT'
+export interface PeerFileRequest {
+  type: 'FILE_REQUEST'
   messageId: string
+  files: Array<{ name: string }>
 }
 
 export interface PeerFileComplete {
@@ -37,7 +38,7 @@ export interface PeerFileComplete {
   messageId: string
 }
 
-export type PeerPacket = PeerIdentify | PeerMessage | PeerAck | PeerFileOffer | PeerFileAccept | PeerFileComplete
+export type PeerPacket = PeerIdentify | PeerMessage | PeerAck | PeerFileOffer | PeerFileRequest | PeerFileComplete
 
 export interface PeerConfig {
   publicKey: string  // 64-char hex

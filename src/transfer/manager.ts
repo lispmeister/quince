@@ -11,12 +11,28 @@ import type { PeerFileOffer } from '../transport/types.js'
 import type { FileTransfer, TransferState } from './types.js'
 import { getMediaDir, getReceivedMediaDir, ensureMediaDirs } from '../media.js'
 
+export interface PendingMessage {
+  messageId: string
+  mime: string
+  senderPubkey: string
+  senderAlias: string
+  signatureValid: boolean
+  refs: Array<{ name: string }>
+  receivedAt: number
+}
+
+const PENDING_TIMEOUT_MS = 5 * 60 * 1000  // 5 minutes
+const PENDING_CHECK_INTERVAL_MS = 30 * 1000  // 30 seconds
+
 export class FileTransferManager extends EventEmitter {
   private store: Corestore | null = null
   private swarm: Hyperswarm | null = null
-  private drives: Map<string, Hyperdrive> = new Map()   // driveKey hex -> drive
+  private drives: Map<string, Hyperdrive> = new Map()       // driveKey hex -> drive
+  private peerDrives: Map<string, Hyperdrive> = new Map()    // peer pubkey -> drive (outbound)
   private state: TransferState = { transfers: {} }
   private stateFile: string
+  private pendingMessages: Map<string, PendingMessage> = new Map()  // messageId -> pending
+  private pendingTimer: ReturnType<typeof setInterval> | null = null
 
   constructor() {
     super()
@@ -38,10 +54,28 @@ export class FileTransferManager extends EventEmitter {
     })
 
     this.loadState()
+
+    // Check for timed-out pending messages
+    this.pendingTimer = setInterval(() => {
+      const now = Date.now()
+      for (const [messageId, pending] of this.pendingMessages) {
+        if (now - pending.receivedAt >= PENDING_TIMEOUT_MS) {
+          this.pendingMessages.delete(messageId)
+          this.emit('transfer-timeout', pending)
+        }
+      }
+    }, PENDING_CHECK_INTERVAL_MS)
+
     console.log('File transfer manager started')
   }
 
   async destroy(): Promise<void> {
+    if (this.pendingTimer) {
+      clearInterval(this.pendingTimer)
+      this.pendingTimer = null
+    }
+    this.pendingMessages.clear()
+
     // Close all open drives
     for (const [key, drive] of this.drives) {
       try {
@@ -51,6 +85,7 @@ export class FileTransferManager extends EventEmitter {
       }
     }
     this.drives.clear()
+    this.peerDrives.clear()
 
     if (this.swarm) {
       await this.swarm.destroy()
@@ -63,13 +98,33 @@ export class FileTransferManager extends EventEmitter {
     }
   }
 
+  // --- Pending message queue ---
+
+  addPendingMessage(pending: PendingMessage): void {
+    this.pendingMessages.set(pending.messageId, pending)
+  }
+
+  getPendingMessage(messageId: string): PendingMessage | undefined {
+    return this.pendingMessages.get(messageId)
+  }
+
+  removePendingMessage(messageId: string): void {
+    this.pendingMessages.delete(messageId)
+  }
+
+  // --- Drive management ---
+
   private async getOrCreateDrive(peerPubkey: string): Promise<Hyperdrive> {
+    const existing = this.peerDrives.get(peerPubkey)
+    if (existing) return existing
+
     const ns = this.store!.namespace('outbound-' + peerPubkey)
     const drive = new Hyperdrive(ns)
     await drive.ready()
 
     const keyHex = b4a.toString(drive.key, 'hex')
     this.drives.set(keyHex, drive)
+    this.peerDrives.set(peerPubkey, drive)
 
     // Join file swarm on this drive's discovery key
     const discoveryKey = drive.discoveryKey
@@ -99,7 +154,9 @@ export class FileTransferManager extends EventEmitter {
     return drive
   }
 
-  async prepareSend(
+  // --- Sender side ---
+
+  async handleFileRequest(
     messageId: string,
     peerPubkey: string,
     refs: Array<{ name: string }>
@@ -112,6 +169,10 @@ export class FileTransferManager extends EventEmitter {
 
     for (const ref of refs) {
       const filePath = path.join(mediaDir, ref.name)
+      if (!fs.existsSync(filePath)) {
+        console.error(`File not found (deleted since send?): ${ref.name}`)
+        continue
+      }
       const data = fs.readFileSync(filePath) as Buffer
       const drivePath = `/${messageId}/${ref.name}`
 
@@ -148,6 +209,8 @@ export class FileTransferManager extends EventEmitter {
       files
     }
   }
+
+  // --- Receiver side ---
 
   async handleFileOffer(
     offer: PeerFileOffer,
@@ -213,7 +276,11 @@ export class FileTransferManager extends EventEmitter {
       this.saveState()
 
       if (allOk) {
-        this.emit('transfer-complete', offer.messageId, senderPubkey)
+        this.emit('transfer-complete', {
+          messageId: offer.messageId,
+          senderPubkey,
+          files: offer.files.map(f => ({ name: f.name, size: f.size }))
+        })
       }
     } catch (err) {
       console.error('Failed to handle file offer:', err)
@@ -233,12 +300,51 @@ export class FileTransferManager extends EventEmitter {
     return null
   }
 
-  markComplete(messageId: string, direction: 'send' | 'receive'): void {
+  // --- Cleanup ---
+
+  async cleanup(messageId: string, direction: 'send' | 'receive'): Promise<void> {
     for (const transfer of Object.values(this.state.transfers)) {
-      if (transfer.messageId === messageId && transfer.direction === direction) {
-        transfer.state = 'complete'
-        transfer.updatedAt = Date.now()
+      if (transfer.messageId !== messageId || transfer.direction !== direction) continue
+
+      if (direction === 'send') {
+        // Delete files from drive
+        const drive = this.drives.get(transfer.driveKey)
+        if (drive) {
+          for (const file of transfer.files) {
+            try {
+              await drive.del(file.path)
+            } catch (err) {
+              // ignore
+            }
+          }
+
+          // Check if any other active transfer uses this drive
+          const otherActive = Object.values(this.state.transfers).some(
+            t => t.driveKey === transfer.driveKey && t.id !== transfer.id && t.state !== 'complete' && t.state !== 'failed'
+          )
+          if (!otherActive) {
+            try {
+              await drive.close()
+            } catch (err) {
+              // ignore
+            }
+            this.drives.delete(transfer.driveKey)
+            // Find and remove from peerDrives
+            for (const [pubkey, d] of this.peerDrives) {
+              if (d === drive) {
+                this.peerDrives.delete(pubkey)
+                break
+              }
+            }
+          }
+        }
+      } else {
+        // Receiver: keep remote drive open for potential reuse (same sender
+        // reuses the same drive key). Drives are closed in destroy().
       }
+
+      transfer.state = 'complete'
+      transfer.updatedAt = Date.now()
     }
     this.saveState()
   }

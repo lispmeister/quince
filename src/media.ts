@@ -93,3 +93,13 @@ export function transformFileRefs(
   }
   return result
 }
+
+export function transformFileRefsFailed(body: string, fileNames: string[]): string {
+  let result = body
+  for (const name of fileNames) {
+    const uri = `quince:/media/${name}`
+    const replacement = `[${name} — transfer failed]`
+    result = result.split(uri).join(replacement)
+  }
+  return result
+}

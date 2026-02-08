@@ -27,46 +27,49 @@ MUA composes:                            MUA sees via POP3:
 1. Alice drops `photo.jpg` into `~/.quince/media/`
 2. Alice composes email in MUA: `"Hey Bob, see this: quince:/media/photo.jpg"`
 3. MUA sends via SMTP to localhost
-4. Quince's `onMessage` parses body, finds `quince:/media/photo.jpg`
+4. Quince's SMTP `validateData` parses body, finds `quince:/media/photo.jpg`
 5. Quince validates: does `~/.quince/media/photo.jpg` exist? If not → `550` reject
-6. Quince sends the **text message immediately** (MESSAGE packet, small, fast — same as today)
-7. Quince sends a **FILE_OFFER** packet to Bob's daemon
-8. Bob's daemon responds with **FILE_ACCEPT**
-9. Quince puts the file into a **per-peer Hyperdrive** and transfer begins asynchronously
-10. Transfer runs in background via the **file transfer queue**
+6. Quince sends the **text message only** (MESSAGE packet — same as today)
+7. Alice waits — Bob will request the files when ready
 
 ## Workflow: Receiver (Bob)
 
-1. Bob's quince receives MESSAGE — stores .eml immediately. Bob can read the email right away.
-2. Bob's quince receives FILE_OFFER — creates pending transfer entry
-3. Bob's quince sends FILE_ACCEPT (auto-accept from whitelisted peer, for now)
+1. Bob's quince receives MESSAGE — detects `quince:/media/*` refs in the body
+2. Bob's quince **holds the message** (does not store to inbox yet) and sends **FILE_REQUEST** to Alice
+3. Alice receives FILE_REQUEST, puts file(s) into a per-peer Hyperdrive, responds with **FILE_OFFER**
 4. Bob opens Alice's Hyperdrive (read-only), joins the file swarm
 5. Hyperdrive replicates — chunked, verified, resumable
 6. File arrives in `~/.quince/media/alice/photo.jpg`
-7. Bob's quince sends FILE_COMPLETE
-8. Transfer entry marked complete
+7. Bob's quince transforms file refs with real sizes, stores .eml to inbox
+8. Bob's quince sends **FILE_COMPLETE** to Alice
+9. Alice cleans up drive files; Bob keeps the remote drive open for reuse
 
-## Decoupled Lifecycles
+If no files arrive within **5 minutes**, the message is delivered with failure markers: `[photo.jpg — transfer failed]`.
 
-Message delivery and file transfer are **separate concerns with separate lifecycles**.
+## Coupled Lifecycles (Pull Protocol)
+
+Message delivery and file transfer are **coupled** — the receiver holds the message until files arrive. This ensures the .eml always contains accurate file sizes and that the user sees the complete message with files ready to open.
 
 ```
-MESSAGE  ─→  fast, small, immediate, uses existing queue/retry
-FILE     ─→  slow, large, async, uses new transfer queue with progress
+MESSAGE  ─→  received, ACK'd, but HELD on receiver side
+FILE_REQUEST ─→  receiver requests files from sender
+FILE_OFFER   ─→  sender puts files in drive, sends metadata
+REPLICATE    ─→  Hyperdrive transfers files
+FILE_COMPLETE ─→  receiver confirms, delivers message to inbox
 ```
 
-The message arrives in seconds. The file might take minutes or hours. Bob reads the email immediately and sees that a file is on the way. It shows up in his media folder when ready.
+The ACK is still sent immediately (transport-level receipt). Only .eml storage is deferred.
 
-## Protocol: New Packet Types
+## Protocol: Packet Types
 
 ```
 Sender                              Receiver
   │                                    │
-  │──── MESSAGE (text + refs) ────────►│  (existing, immediate)
+  │──── MESSAGE (text + refs) ────────►│  (existing, ACK'd immediately)
   │                                    │
-  │──── FILE_OFFER ───────────────────►│  (what files, how big)
+  │◄─── FILE_REQUEST ─────────────────│  (receiver detects refs, requests files)
   │                                    │
-  │◄─── FILE_ACCEPT ──────────────────│  (go ahead)
+  │──── FILE_OFFER ───────────────────►│  (drive key + file metadata)
   │                                    │
   │◄══ Hyperdrive replication ════════►│  (separate swarm, async)
   │                                    │
@@ -77,6 +80,14 @@ Sender                              Receiver
 ### Packet Definitions
 
 ```typescript
+interface PeerFileRequest {
+  type: 'FILE_REQUEST'
+  messageId: string        // links to the MESSAGE this belongs to
+  files: Array<{
+    name: string           // "photo.jpg"
+  }>
+}
+
 interface PeerFileOffer {
   type: 'FILE_OFFER'
   messageId: string        // links to the MESSAGE this belongs to
@@ -87,11 +98,6 @@ interface PeerFileOffer {
     size: number           // raw bytes
     hash: string           // BLAKE2b hex
   }>
-}
-
-interface PeerFileAccept {
-  type: 'FILE_ACCEPT'
-  messageId: string
 }
 
 interface PeerFileComplete {
@@ -107,11 +113,11 @@ The existing messaging swarm uses line-delimited JSON over Hyperswarm connection
 Solution: two Hyperswarm instances per daemon.
 
 ```
-Primary Swarm (existing)     → MESSAGE, IDENTIFY, ACK, FILE_OFFER/ACCEPT/COMPLETE
+Primary Swarm (existing)     → MESSAGE, IDENTIFY, ACK, FILE_REQUEST/OFFER/COMPLETE
 File Transfer Swarm (new)    → Corestore.replicate(), Hyperdrive data
 ```
 
-Signaling (offer/accept/complete) goes over the existing messaging connections. Only the bulk data replication needs the separate swarm.
+Signaling (request/offer/complete) goes over the existing messaging connections. Only the bulk data replication needs the separate swarm.
 
 ## Per-Peer Outbound Drives
 
@@ -291,9 +297,9 @@ The HTTP server should also expose **transfer status** via the same URL scheme. 
 
 Implementation details TBD in a future milestone.
 
-### 5. File size in .eml transform
+### 5. ~~File size in .eml transform~~ (Resolved)
 
-The MESSAGE packet arrives before the FILE_OFFER, so when the .eml is written the receiver doesn't yet know the actual file sizes. Currently the transform shows "0 B". A follow-up could re-write the .eml when the FILE_OFFER arrives with real sizes, or defer the transform until then — but the spec says the .eml is written once and the local path (which is correct from the start) is what matters.
+Resolved by the pull protocol. The receiver now holds the message until files arrive. The FILE_OFFER contains real sizes, and the .eml is written once with accurate file metadata.
 
 ### 6. `waitForFile` polling and timeout
 
@@ -301,4 +307,26 @@ The receiver polls for file data every 500ms with a 60s timeout. For distant pee
 
 ### 7. DHT discovery latency for file swarm
 
-The file transfer swarm uses DHT discovery, which adds latency before replication can begin. On localhost this works well (typically under 10s), but across the internet the initial peer discovery could take longer. The signaling channel (FILE_OFFER/ACCEPT over the messaging swarm) is instant — only the bulk data replication depends on DHT. A future optimisation could pass connection hints (e.g. the sender's address) in the FILE_OFFER to allow direct connection without DHT lookup.
+The file transfer swarm uses DHT discovery, which adds latency before replication can begin. On localhost this works well (typically under 10s), but across the internet the initial peer discovery could take longer. The signaling channel (FILE_REQUEST/OFFER over the messaging swarm) is instant — only the bulk data replication depends on DHT. A future optimisation could pass connection hints (e.g. the sender's address) in the FILE_OFFER to allow direct connection without DHT lookup.
+
+## Known Concerns
+
+### 1. Receiver-side remote drives accumulate in memory
+
+When the receiver finishes downloading files, the remote Hyperdrive is **not closed** — it stays open in the `drives` map. This is intentional: the sender reuses the same per-peer drive key across transfers, and closing the drive closes the underlying Hypercores in the shared Corestore. Reopening a drive whose cores were closed causes `Corestore is closed` errors.
+
+The trade-off: remote drives accumulate in memory for the daemon's lifetime. Each open drive holds a small number of Hypercore instances. For typical usage (a handful of peers), this is fine. For a daemon with many active peers over a long uptime, memory could grow. Drives are cleaned up on daemon restart.
+
+Possible future fix: reference-counting drives, or using separate Corestore namespaces per remote drive so closing one doesn't affect others.
+
+### 2. Pending messages are in-memory only
+
+The pending message queue (`Map<messageId, PendingMessage>`) is not persisted to disk. If the daemon restarts while a message is held pending file transfer, the message is lost. This is acceptable because:
+
+- Pending messages have a 5-minute max lifetime
+- The sender would need to re-send the MESSAGE anyway (no resume mechanism for the protocol exchange)
+- The sender's message queue will retry delivery, which restarts the whole flow
+
+### 3. Sender-side cleanup closes drives eagerly
+
+When the sender receives FILE_COMPLETE, `cleanup('send')` deletes files from the drive and may close the drive if no other active transfers use it. If the receiver subsequently needs to re-download (e.g., crash after FILE_COMPLETE but before writing to disk), the data is gone. This matches the "fire and forget" model — FILE_COMPLETE is the receiver's guarantee that it has the data.

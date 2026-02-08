@@ -1,2 +1,2 @@
-export { FileTransferManager } from './manager.js'
+export { FileTransferManager, type PendingMessage } from './manager.js'
 export * from './types.js'

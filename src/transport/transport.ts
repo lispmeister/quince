@@ -1,7 +1,7 @@
 import { EventEmitter } from 'bare-events'
 import Hyperswarm, { type Peer, type PeerInfo, type Discovery } from 'hyperswarm'
 import b4a from 'b4a'
-import type { PeerPacket, PeerMessage, PeerAck, PeerIdentify, PeerFileOffer, PeerFileAccept, PeerFileComplete } from './types.js'
+import type { PeerPacket, PeerMessage, PeerAck, PeerIdentify, PeerFileOffer, PeerFileRequest, PeerFileComplete } from './types.js'
 import type { Identity } from '../identity.js'
 
 export interface TransportConfig {
@@ -135,7 +135,7 @@ export class Transport extends EventEmitter {
         this.pendingAcks.delete(packet.id)
         pending.resolve()
       }
-    } else if (packet.type === 'FILE_OFFER' || packet.type === 'FILE_ACCEPT' || packet.type === 'FILE_COMPLETE') {
+    } else if (packet.type === 'FILE_OFFER' || packet.type === 'FILE_REQUEST' || packet.type === 'FILE_COMPLETE') {
       if (!conn.identityPubkey) {
         console.error(`Received ${packet.type} before IDENTIFY`)
         return
@@ -145,7 +145,7 @@ export class Transport extends EventEmitter {
         return
       }
       const eventName = packet.type === 'FILE_OFFER' ? 'file-offer'
-        : packet.type === 'FILE_ACCEPT' ? 'file-accept'
+        : packet.type === 'FILE_REQUEST' ? 'file-request'
         : 'file-complete'
       this.emit(eventName, packet, conn.identityPubkey)
     }
@@ -264,13 +264,13 @@ export class Transport extends EventEmitter {
     peer.write(JSON.stringify(offer) + '\n')
   }
 
-  sendFileAccept(recipientPubkey: string, accept: PeerFileAccept): void {
+  sendFileRequest(recipientPubkey: string, request: PeerFileRequest): void {
     const peer = this.peersByIdentity.get(recipientPubkey)
     if (!peer) {
-      console.error(`Cannot send FILE_ACCEPT, peer not connected: ${recipientPubkey.slice(0, 16)}...`)
+      console.error(`Cannot send FILE_REQUEST, peer not connected: ${recipientPubkey.slice(0, 16)}...`)
       return
     }
-    peer.write(JSON.stringify(accept) + '\n')
+    peer.write(JSON.stringify(request) + '\n')
   }
 
   sendFileComplete(recipientPubkey: string, complete: PeerFileComplete): void {
