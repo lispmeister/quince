@@ -1,17 +1,8 @@
 # quince
 
-> **WARNING: EXPERIMENTAL SOFTWARE**
->
-> This is a proof-of-concept implementation. **Do not use for sensitive communications.**
->
-> - Your identity is a cryptographic keypair. **Protect your secret key.**
-> - Only accept connections from trusted peers listed in your config.
-> - There is no end-to-end encryption beyond the transport layer.
-> - Messages are not stored securely on disk.
->
-> This software is provided for research and educational purposes only.
-
 Decentralized SMTP MTA over the Pear P2P network.
+
+![quince](docs/images/Vincent_van_Gogh_-_Still_Life_with_Quinces_-_Google_Art_Project.jpg)
 
 ## Overview
 
@@ -303,6 +294,17 @@ Spins up two full daemon instances (ALICE and BOB) with Hyperswarm to test real 
   drives/         # Hyperdrive storage (Corestore internals)
   transfers.json  # File transfer state
 ```
+
+## WARNING: EXPERIMENTAL SOFTWARE
+
+This is a proof-of-concept implementation. **Do not use for sensitive communications.**
+
+- Your identity is a cryptographic keypair. **Protect your secret key.**
+- Only accept connections from trusted peers listed in your config.
+- There is no end-to-end encryption beyond the transport layer.
+- Messages are not stored securely on disk.
+
+This software is provided for research and educational purposes only.
 
 ## License
 
