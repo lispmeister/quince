@@ -9,7 +9,7 @@ import b4a from 'b4a'
 import crypto from 'hypercore-crypto'
 import type { PeerFileOffer } from '../transport/types.js'
 import type { FileTransfer, TransferState } from './types.js'
-import { getMediaDir, getReceivedMediaDir, ensureMediaDirs } from '../media.js'
+import { getMediaDir, getReceivedMediaDir, ensureMediaDirs, uniqueFileName } from '../media.js'
 
 export interface PendingMessage {
   messageId: string
@@ -244,6 +244,7 @@ export class FileTransferManager extends EventEmitter {
 
       const receivedDir = getReceivedMediaDir(senderAlias)
       let allOk = true
+      const downloadedFiles: Array<{ name: string; localName: string; size: number }> = []
 
       for (const file of offer.files) {
         try {
@@ -262,9 +263,16 @@ export class FileTransferManager extends EventEmitter {
             continue
           }
 
-          const destPath = path.join(receivedDir, file.name)
+          // Deduplicate filename if it already exists
+          const localName = uniqueFileName(receivedDir, file.name)
+          const destPath = path.join(receivedDir, localName)
           fs.writeFileSync(destPath, data)
-          console.log(`Received file: ${file.name} (${file.size} bytes)`)
+          if (localName !== file.name) {
+            console.log(`Received file: ${file.name} → ${localName} (${file.size} bytes, renamed to avoid overwrite)`)
+          } else {
+            console.log(`Received file: ${file.name} (${file.size} bytes)`)
+          }
+          downloadedFiles.push({ name: file.name, localName, size: file.size })
         } catch (err) {
           console.error(`Failed to download ${file.name}:`, err)
           allOk = false
@@ -279,7 +287,7 @@ export class FileTransferManager extends EventEmitter {
         this.emit('transfer-complete', {
           messageId: offer.messageId,
           senderPubkey,
-          files: offer.files.map(f => ({ name: f.name, size: f.size }))
+          files: downloadedFiles
         })
       }
     } catch (err) {
@@ -306,13 +314,14 @@ export class FileTransferManager extends EventEmitter {
     for (const transfer of Object.values(this.state.transfers)) {
       if (transfer.messageId !== messageId || transfer.direction !== direction) continue
 
+      const drive = this.drives.get(transfer.driveKey)
+
       if (direction === 'send') {
-        // Delete files from drive
-        const drive = this.drives.get(transfer.driveKey)
         if (drive) {
+          // Clear blob data (frees disk space, unlike drive.del which is metadata-only)
           for (const file of transfer.files) {
             try {
-              await drive.del(file.path)
+              await drive.clear(file.path)
             } catch (err) {
               // ignore
             }
@@ -323,13 +332,18 @@ export class FileTransferManager extends EventEmitter {
             t => t.driveKey === transfer.driveKey && t.id !== transfer.id && t.state !== 'complete' && t.state !== 'failed'
           )
           if (!otherActive) {
+            // Stop DHT announcements for this drive
+            try {
+              await this.swarm!.leave(drive.discoveryKey)
+            } catch (err) {
+              // ignore — DHT record expires in 20 min anyway
+            }
             try {
               await drive.close()
             } catch (err) {
               // ignore
             }
             this.drives.delete(transfer.driveKey)
-            // Find and remove from peerDrives
             for (const [pubkey, d] of this.peerDrives) {
               if (d === drive) {
                 this.peerDrives.delete(pubkey)
@@ -339,8 +353,15 @@ export class FileTransferManager extends EventEmitter {
           }
         }
       } else {
-        // Receiver: keep remote drive open for potential reuse (same sender
-        // reuses the same drive key). Drives are closed in destroy().
+        // Receiver: stop looking for peers on this drive's topic
+        if (drive) {
+          try {
+            await this.swarm!.leave(drive.discoveryKey)
+          } catch (err) {
+            // ignore
+          }
+        }
+        // Drive stays open in memory for reuse (same sender reuses drive key)
       }
 
       transfer.state = 'complete'

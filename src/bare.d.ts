@@ -145,6 +145,7 @@ declare module 'hyperdrive' {
     get(path: string): Promise<Buffer | null>
     entry(path: string): Promise<HyperdriveEntry | null>
     del(path: string): Promise<void>
+    clear(path: string): Promise<void>
     close(): Promise<void>
     key: Buffer
     discoveryKey: Buffer

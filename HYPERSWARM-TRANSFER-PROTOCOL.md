@@ -327,6 +327,66 @@ The pending message queue (`Map<messageId, PendingMessage>`) is not persisted to
 - The sender would need to re-send the MESSAGE anyway (no resume mechanism for the protocol exchange)
 - The sender's message queue will retry delivery, which restarts the whole flow
 
-### 3. Sender-side cleanup closes drives eagerly
+### ~~3. Sender-side cleanup closes drives eagerly~~ (Resolved)
 
-When the sender receives FILE_COMPLETE, `cleanup('send')` deletes files from the drive and may close the drive if no other active transfers use it. If the receiver subsequently needs to re-download (e.g., crash after FILE_COMPLETE but before writing to disk), the data is gone. This matches the "fire and forget" model — FILE_COMPLETE is the receiver's guarantee that it has the data.
+Resolved. Sender cleanup now uses `drive.clear(path)` (frees blob blocks) instead of `drive.del(path)` (metadata-only), and calls `swarm.leave(discoveryKey)` to stop DHT announcements. See "Cleanup & Garbage Collection" below.
+
+## Cleanup & Garbage Collection
+
+### The problem
+
+Hyperdrive operations leave residue at three layers:
+
+1. **DHT announcements** — `swarm.join(discoveryKey)` registers the node on the HyperDHT with a 20-minute TTL, refreshed every 10 minutes. Without `swarm.leave()`, the node keeps announcing itself for completed transfers.
+2. **Blob data on disk** — `drive.del(path)` only removes the metadata entry from Hyperbee. The actual file content blocks remain in the Hypercore append-only log under `~/.quince/drives/`. Disk space is never reclaimed.
+3. **Drive instances in memory** — Open Hyperdrive objects hold Hypercore references. Without closing, they accumulate.
+
+### Relevant APIs
+
+| Method | What it does |
+|---|---|
+| `drive.del(path)` | Removes metadata entry only — blobs remain on disk |
+| `drive.clear(path)` | Removes actual blob blocks — frees disk space |
+| `drive.clearAll()` | Clears all blob content from a drive |
+| `drive.purge()` | Full teardown — closes drive, purges both cores |
+| `swarm.leave(topic)` | Sends DHT unannounce, stops 10-min refresh cycle |
+
+DHT announcements have a **20-minute TTL**. If `swarm.leave()` fails (network error), the announcement expires naturally after 20 minutes without refresh.
+
+### What cleanup does
+
+**Sender** (after receiving FILE_COMPLETE):
+1. `drive.clear(path)` for each transferred file — reclaims blob disk space
+2. If no other active transfers use this drive: close drive, remove from maps
+3. `swarm.leave(discoveryKey)` — stop announcing on DHT
+
+**Receiver** (after successful download):
+1. `swarm.leave(discoveryKey)` — stop looking for peers on that topic
+2. Drive stays open in memory for reuse (same sender reuses the same drive key)
+
+### DHT announcement lifecycle
+
+```
+swarm.join(dk, {server:true})  →  Announce on DHT (sender)
+  ↓ refresh every 10 min
+swarm.leave(dk)                →  Unannounce on DHT
+  ↓ if unannounce fails
+DHT record expires             →  20-min TTL, natural expiry
+```
+
+## Receiver File Deduplication
+
+When receiving a file, if a file with the same name already exists in the sender's media directory (`~/.quince/media/<alias>/`), the receiver appends an auto-increment number before the extension:
+
+```
+photo.jpg       → exists → photo-1.jpg
+photo-1.jpg     → exists → photo-2.jpg
+document.tar.gz → exists → document.tar-1.gz
+README          → exists → README-1
+```
+
+The .eml always reflects the actual filename on disk. The original `quince:/media/photo.jpg` URI is matched by the original name, but the replacement text and local path use the deduplicated name:
+
+```
+[photo-1.jpg — 10.2 MB] → ~/.quince/media/alice/photo-1.jpg
+```

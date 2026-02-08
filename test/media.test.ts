@@ -65,16 +65,33 @@ function formatSize(bytes: number): string {
 function transformFileRefs(
   body: string,
   senderAlias: string,
-  files: Array<{ name: string; size: number }>
+  files: Array<{ name: string; localName?: string; size: number }>
 ): string {
   let result = body
   for (const file of files) {
     const uri = `quince:/media/${file.name}`
-    const localPath = join(getReceivedMediaDir(senderAlias), file.name)
-    const replacement = `[${file.name} — ${formatSize(file.size)}] → ${localPath}`
+    const displayName = file.localName ?? file.name
+    const localPath = join(getReceivedMediaDir(senderAlias), displayName)
+    const replacement = `[${displayName} — ${formatSize(file.size)}] → ${localPath}`
     result = result.split(uri).join(replacement)
   }
   return result
+}
+
+function uniqueFileName(dir: string, name: string): string {
+  if (!existsSync(join(dir, name))) return name
+
+  const dotIdx = name.lastIndexOf('.')
+  const base = dotIdx > 0 ? name.slice(0, dotIdx) : name
+  const ext = dotIdx > 0 ? name.slice(dotIdx) : ''
+
+  let counter = 1
+  let candidate = `${base}-${counter}${ext}`
+  while (existsSync(join(dir, candidate))) {
+    counter++
+    candidate = `${base}-${counter}${ext}`
+  }
+  return candidate
 }
 
 function transformFileRefsFailed(body: string, fileNames: string[]): string {
@@ -214,5 +231,54 @@ describe('transformFileRefsFailed', () => {
     const body = 'quince:/media/photo.jpg'
     const result = transformFileRefsFailed(body, ['other.jpg'])
     expect(result).toBe('quince:/media/photo.jpg')
+  })
+})
+
+describe('uniqueFileName', () => {
+  const testDir = join(homedir(), '.quince', 'media', '__test_dedup')
+
+  beforeAll(() => {
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(join(testDir, 'photo.jpg'), 'existing')
+    writeFileSync(join(testDir, 'photo-1.jpg'), 'existing')
+    writeFileSync(join(testDir, 'noext'), 'existing')
+  })
+
+  afterAll(() => {
+    rmSync(testDir, { recursive: true })
+  })
+
+  test('returns original name when no conflict', () => {
+    expect(uniqueFileName(testDir, 'newfile.txt')).toBe('newfile.txt')
+  })
+
+  test('appends -1 when file exists', () => {
+    // photo.jpg exists, photo-1.jpg also exists → photo-2.jpg
+    expect(uniqueFileName(testDir, 'photo.jpg')).toBe('photo-2.jpg')
+  })
+
+  test('handles files without extension', () => {
+    expect(uniqueFileName(testDir, 'noext')).toBe('noext-1')
+  })
+})
+
+describe('transformFileRefs with localName', () => {
+  test('uses localName for display and path when provided', () => {
+    const body = 'See: quince:/media/photo.jpg done'
+    const result = transformFileRefs(body, 'alice', [
+      { name: 'photo.jpg', localName: 'photo-1.jpg', size: 1024 }
+    ])
+    expect(result).toContain('[photo-1.jpg')
+    expect(result).toContain('alice/photo-1.jpg')
+    expect(result).not.toContain('quince:/media/')
+  })
+
+  test('falls back to name when localName not provided', () => {
+    const body = 'See: quince:/media/photo.jpg done'
+    const result = transformFileRefs(body, 'alice', [
+      { name: 'photo.jpg', size: 1024 }
+    ])
+    expect(result).toContain('[photo.jpg')
+    expect(result).toContain('alice/photo.jpg')
   })
 })

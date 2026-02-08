@@ -569,7 +569,7 @@ async function startDaemon(): Promise<void> {
   })
 
   // Receiver: files downloaded — deliver pending message to inbox
-  transferManager.on('transfer-complete', async (event: { messageId: string; senderPubkey: string; files: Array<{ name: string; size: number }> }) => {
+  transferManager.on('transfer-complete', async (event: { messageId: string; senderPubkey: string; files: Array<{ name: string; localName: string; size: number }> }) => {
     const pending = transferManager.getPendingMessage(event.messageId)
     if (!pending) {
       console.error(`No pending message for completed transfer ${event.messageId.slice(0, 8)}...`)

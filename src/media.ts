@@ -82,16 +82,33 @@ function formatSize(bytes: number): string {
 export function transformFileRefs(
   body: string,
   senderAlias: string,
-  files: Array<{ name: string; size: number }>
+  files: Array<{ name: string; localName?: string; size: number }>
 ): string {
   let result = body
   for (const file of files) {
     const uri = `quince:/media/${file.name}`
-    const localPath = path.join(getReceivedMediaDir(senderAlias), file.name)
-    const replacement = `[${file.name} — ${formatSize(file.size)}] → ${localPath}`
+    const displayName = file.localName ?? file.name
+    const localPath = path.join(getReceivedMediaDir(senderAlias), displayName)
+    const replacement = `[${displayName} — ${formatSize(file.size)}] → ${localPath}`
     result = result.split(uri).join(replacement)
   }
   return result
+}
+
+export function uniqueFileName(dir: string, name: string): string {
+  if (!fs.existsSync(path.join(dir, name))) return name
+
+  const dotIdx = name.lastIndexOf('.')
+  const base = dotIdx > 0 ? name.slice(0, dotIdx) : name
+  const ext = dotIdx > 0 ? name.slice(dotIdx) : ''
+
+  let counter = 1
+  let candidate = `${base}-${counter}${ext}`
+  while (fs.existsSync(path.join(dir, candidate))) {
+    counter++
+    candidate = `${base}-${counter}${ext}`
+  }
+  return candidate
 }
 
 export function transformFileRefsFailed(body: string, fileNames: string[]): string {
