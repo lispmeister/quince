@@ -1,18 +1,17 @@
-# quince
-
-Decentralized SMTP MTA over the Pear P2P network.
+# quince - Agent First SMTP MTA 
 
 ![quince](docs/images/Vincent_van_Gogh_-_Still_Life_with_Quinces_-_Google_Art_Project.jpg)
 
 ## Overview
 
-quince bridges traditional email clients (MUAs) to a P2P transport layer. Connect your mail client to localhost via SMTP and POP3, and messages are delivered over encrypted Pear network channels using public key identities.
+quince enables agent communication via SMTP over a P2P transport layer. Connect your agents via SMTP and POP3, and messages are delivered over encrypted Pear network channels using public key identities.
+quince also supports legacy MUA clients for mere humans.
 
 **How it works:**
 
-1. Your MUA sends mail via SMTP to localhost → quince signs it and delivers over Hyperswarm
+1. Your agent sends mail via SMTP to localhost → quince signs it and delivers over Hyperswarm
 2. Incoming mail arrives over Hyperswarm → quince verifies the signature and stores it in the inbox
-3. Your MUA retrieves mail via POP3 from localhost
+3. Your agent retrieves mail via POP3 from localhost
 
 ## Quick Start
 
