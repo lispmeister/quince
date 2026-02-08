@@ -7,6 +7,7 @@ export interface SmtpServerConfig {
   hostname: string
   localUser: string
   onMessage: (from: string, to: string, data: string) => Promise<void>
+  validateData?: (from: string, to: string, data: string) => string | null
 }
 
 export class SmtpServer {
@@ -58,7 +59,8 @@ export class SmtpServer {
     const session = new SmtpSession({
       hostname: this.config.hostname,
       localUser: this.config.localUser,
-      onMessage: this.config.onMessage
+      onMessage: this.config.onMessage,
+      validateData: this.config.validateData
     })
 
     // Send greeting

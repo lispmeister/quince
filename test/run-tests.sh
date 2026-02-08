@@ -398,6 +398,66 @@ test_bad_permissions_refuses_start() {
   fi
 }
 
+test_file_transfer() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: File transfer from ALICE to BOB via Hyperdrive"
+
+  # Create media directory and test file for ALICE
+  mkdir -p "$ALICE_HOME/.quince/media"
+  echo "Hello from Hyperdrive!" > "$ALICE_HOME/.quince/media/test.txt"
+
+  # Send email with file reference from ALICE to BOB
+  local to_addr="bob@${BOB_PUBKEY}.quincemail.com"
+  send_smtp_message "$ALICE_PORT" "alice@test.com" "$to_addr" "File transfer test" "See this: quince:/media/test.txt"
+
+  # Wait for message delivery + file transfer (up to 60s)
+  local elapsed=0
+  local received=false
+  while [ $elapsed -lt 60 ]; do
+    if [ -f "$BOB_HOME/.quince/media/alice/test.txt" ]; then
+      received=true
+      break
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  if ! $received; then
+    fail "File transfer: test.txt did not arrive at BOB within 60s"
+    echo "--- ALICE log ---"
+    tail -40 "$ALICE_HOME/daemon.log"
+    echo "--- BOB log ---"
+    tail -40 "$BOB_HOME/daemon.log"
+    return 1
+  fi
+
+  # Verify file content matches
+  local received_content
+  received_content=$(cat "$BOB_HOME/.quince/media/alice/test.txt")
+  if [ "$received_content" = "Hello from Hyperdrive!" ]; then
+    pass "File transfer: test.txt arrived with correct content"
+  else
+    fail "File transfer: content mismatch (got: '$received_content')"
+    return 1
+  fi
+
+  # Verify BOB's inbox .eml contains transformed path (not the raw URI)
+  TESTS_RUN=$((TESTS_RUN + 1))
+  local eml_file
+  eml_file=$(ls -t "$BOB_HOME/.quince/inbox/"*.eml 2>/dev/null | head -1)
+  if [ -n "$eml_file" ]; then
+    if grep -q "alice/test.txt" "$eml_file" && ! grep -q "quince:/media/test.txt" "$eml_file"; then
+      pass "File transfer: .eml contains transformed path"
+    else
+      fail "File transfer: .eml still contains raw URI or missing local path"
+      echo "EML content:"
+      cat "$eml_file"
+    fi
+  else
+    fail "File transfer: No .eml found in BOB's inbox"
+  fi
+}
+
 #
 # Test summary
 #
@@ -452,6 +512,9 @@ main() {
   test_start_daemons
   test_alice_to_bob_succeeds
   test_bob_to_alice_succeeds
+
+  # File transfer test
+  test_file_transfer
 
   # Cleanup
   stop_all_daemons

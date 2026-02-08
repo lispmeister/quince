@@ -15,7 +15,29 @@ export interface PeerAck {
   id: string
 }
 
-export type PeerPacket = PeerIdentify | PeerMessage | PeerAck
+export interface PeerFileOffer {
+  type: 'FILE_OFFER'
+  messageId: string
+  driveKey: string          // hex Hyperdrive key
+  files: Array<{
+    name: string            // "photo.jpg"
+    path: string            // path within drive: "<msg-id>/photo.jpg"
+    size: number            // raw bytes
+    hash: string            // BLAKE2b hex
+  }>
+}
+
+export interface PeerFileAccept {
+  type: 'FILE_ACCEPT'
+  messageId: string
+}
+
+export interface PeerFileComplete {
+  type: 'FILE_COMPLETE'
+  messageId: string
+}
+
+export type PeerPacket = PeerIdentify | PeerMessage | PeerAck | PeerFileOffer | PeerFileAccept | PeerFileComplete
 
 export interface PeerConfig {
   publicKey: string  // 64-char hex

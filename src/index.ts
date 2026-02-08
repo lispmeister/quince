@@ -1,5 +1,8 @@
 import process from 'bare-process'
 import env from 'bare-env'
+import fs from 'bare-fs'
+import path from 'bare-path'
+import os from 'bare-os'
 import { SmtpServer } from './smtp/index.js'
 import { Transport } from './transport/index.js'
 import type { PeerMessage } from './transport/index.js'
@@ -28,6 +31,9 @@ import {
 import { signMessage, verifyMessage } from './crypto.js'
 import { storeMessage, listMessages, getMessageContent, deleteMessage, getInboxPath } from './inbox.js'
 import { Pop3Server } from './pop3/index.js'
+import { FileTransferManager } from './transfer/index.js'
+import type { PeerFileOffer, PeerFileAccept, PeerFileComplete } from './transport/index.js'
+import { parseFileRefs, validateFileRefs, transformFileRefs, ensureMediaDirs } from './media.js'
 
 let config = loadConfig()
 const identity = loadIdentity()
@@ -56,6 +62,8 @@ Commands:
   inbox                         List received messages
   queue                         Show queued messages
   queue clear                   Clear all queued messages
+  transfers                     Show file transfers
+  transfers --all               Show all transfers (including completed)
   help                          Show this help message
 
 Environment Variables:
@@ -248,6 +256,71 @@ async function showInbox(): Promise<void> {
   }
 }
 
+async function showTransfers(showAll: boolean): Promise<void> {
+  const stateFile = path.join(os.homedir(), '.quince', 'transfers.json')
+  if (!fs.existsSync(stateFile)) {
+    console.log('No transfers found.')
+    return
+  }
+
+  let state: { transfers: Record<string, any> }
+  try {
+    const raw = fs.readFileSync(stateFile, 'utf8') as string
+    state = JSON.parse(raw)
+  } catch (err) {
+    console.error('Failed to read transfers.json:', err)
+    return
+  }
+
+  const transfers = Object.values(state.transfers)
+  const active = transfers.filter((t: any) => t.state !== 'complete')
+  const completed = transfers.filter((t: any) => t.state === 'complete')
+
+  if (transfers.length === 0) {
+    console.log('No transfers found.')
+    return
+  }
+
+  if (active.length > 0) {
+    console.log('Active transfers:')
+    for (const t of active as any[]) {
+      const arrow = t.direction === 'send' ? '↑' : '↓'
+      const alias = getPeerAlias(config, t.peer) ?? t.peer.slice(0, 16) + '...'
+      const dir = t.direction === 'send' ? '→' : '←'
+      for (const f of t.files) {
+        const size = formatBytes(f.size)
+        console.log(`  ${arrow} ${f.name} ${dir} ${alias}  ${size}  ${t.state}`)
+      }
+    }
+    console.log('')
+  }
+
+  if (showAll && completed.length > 0) {
+    console.log('Completed transfers:')
+    for (const t of completed as any[]) {
+      const arrow = t.direction === 'send' ? '↑' : '↓'
+      const alias = getPeerAlias(config, t.peer) ?? t.peer.slice(0, 16) + '...'
+      const dir = t.direction === 'send' ? '→' : '←'
+      for (const f of t.files) {
+        const size = formatBytes(f.size)
+        console.log(`  ${arrow} ${f.name} ${dir} ${alias}  ${size}  complete`)
+      }
+    }
+    console.log('')
+  }
+
+  if (!showAll && completed.length > 0) {
+    console.log(`${completed.length} completed transfer(s) hidden. Use --all to show.`)
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
 // Resolve recipient address to pubkey
 function resolveRecipient(to: string): { pubkey: string; display: string } | null {
   const parsed = parseEmailDomain(to)
@@ -306,6 +379,7 @@ async function startDaemon(): Promise<void> {
 
   const transport = new Transport(identity, { whitelist })
   const queue = new MessageQueue()
+  const transferManager = new FileTransferManager()
 
   let isShuttingDown = false
 
@@ -314,6 +388,15 @@ async function startDaemon(): Promise<void> {
     await transport.start()
   } catch (err) {
     console.error('Failed to start transport:', err)
+    await transport.destroy()
+    process.exit(1)
+  }
+
+  // Start file transfer manager
+  try {
+    await transferManager.start()
+  } catch (err) {
+    console.error('Failed to start file transfer manager:', err)
     await transport.destroy()
     process.exit(1)
   }
@@ -394,8 +477,19 @@ async function startDaemon(): Promise<void> {
         console.log('WARNING: Signature verification failed')
       }
 
+      // Transform file refs to local paths before storing
+      let storedMime = mime
+      const refs = parseFileRefs(mime)
+      if (refs.length > 0 && alias) {
+        // We don't know file sizes yet (offer hasn't arrived), use 0 as placeholder
+        const fileInfo = refs.map(r => ({ name: r.name, size: 0 }))
+        storedMime = transformFileRefs(mime, alias, fileInfo)
+        ensureMediaDirs(alias)
+        console.log(`Transformed ${refs.length} file ref(s) to local paths`)
+      }
+
       // Store to inbox
-      const entry = storeMessage(msg.id, mime, senderPubkey, valid)
+      const entry = storeMessage(msg.id, storedMime, senderPubkey, valid)
       console.log(`Stored: ${entry.file}${valid ? '' : ' (UNVERIFIED)'}`)
 
       console.log(mime)
@@ -432,6 +526,36 @@ async function startDaemon(): Promise<void> {
     console.log(`  To allow messages from this sender, run: quince add-peer <alias> ${pubkey}`)
   })
 
+  // File transfer events
+  transport.on('file-offer', async (offer: PeerFileOffer, senderPubkey: string) => {
+    const alias = getPeerAlias(config, senderPubkey) ?? senderPubkey.slice(0, 16)
+    console.log(`Received FILE_OFFER from ${alias} for ${offer.files.length} file(s)`)
+
+    // Auto-accept from whitelisted peers
+    transport.sendFileAccept(senderPubkey, { type: 'FILE_ACCEPT', messageId: offer.messageId })
+    console.log(`Sent FILE_ACCEPT to ${alias}`)
+
+    await transferManager.handleFileOffer(offer, senderPubkey, alias)
+  })
+
+  transport.on('file-accept', (_accept: PeerFileAccept, senderPubkey: string) => {
+    const alias = getPeerAlias(config, senderPubkey) ?? senderPubkey.slice(0, 16)
+    console.log(`Received FILE_ACCEPT from ${alias}`)
+  })
+
+  transport.on('file-complete', (complete: PeerFileComplete, senderPubkey: string) => {
+    const alias = getPeerAlias(config, senderPubkey) ?? senderPubkey.slice(0, 16)
+    console.log(`Received FILE_COMPLETE from ${alias} for message ${complete.messageId.slice(0, 8)}...`)
+    transferManager.markComplete(complete.messageId, 'send')
+  })
+
+  // When we finish receiving files, send FILE_COMPLETE to sender
+  transferManager.on('transfer-complete', (messageId: string, senderPubkey: string) => {
+    const alias = getPeerAlias(config, senderPubkey) ?? senderPubkey.slice(0, 16)
+    console.log(`File transfer complete from ${alias}, sending FILE_COMPLETE`)
+    transport.sendFileComplete(senderPubkey, { type: 'FILE_COMPLETE', messageId })
+  })
+
   // SMTP message handler
   async function onMessage(from: string, to: string, data: string): Promise<void> {
     console.log('')
@@ -461,6 +585,18 @@ async function startDaemon(): Promise<void> {
       })
       console.log(`Queued for retry`)
     }
+
+    // Check for file references and initiate transfer
+    const refs = parseFileRefs(data)
+    if (refs.length > 0 && success) {
+      try {
+        const offer = await transferManager.prepareSend(messageId, recipient.pubkey, refs)
+        transport.sendFileOffer(recipient.pubkey, offer)
+        console.log(`Sent FILE_OFFER for ${refs.length} file(s) to ${recipient.display}`)
+      } catch (err) {
+        console.error('Failed to prepare file transfer:', err)
+      }
+    }
   }
 
   const smtpServer = new SmtpServer({
@@ -468,7 +604,18 @@ async function startDaemon(): Promise<void> {
     host: BIND_ADDR,
     hostname: HOSTNAME,
     localUser: LOCAL_USER,
-    onMessage
+    onMessage,
+    validateData(from: string, to: string, data: string): string | null {
+      const refs = parseFileRefs(data)
+      if (refs.length === 0) return null
+
+      const { missing } = validateFileRefs(refs)
+      if (missing.length > 0) {
+        const names = missing.map(r => r.name).join(', ')
+        return `550 File not found: ${names}\r\n`
+      }
+      return null
+    }
   })
 
   try {
@@ -523,6 +670,14 @@ async function startDaemon(): Promise<void> {
       console.log('  POP3 server stopped')
     } catch (err) {
       console.error('  Error stopping POP3 server:', err)
+    }
+
+    // Close file transfer manager
+    try {
+      await transferManager.destroy()
+      console.log('  File transfer manager stopped')
+    } catch (err) {
+      console.error('  Error stopping file transfer manager:', err)
     }
 
     // Close transport
@@ -610,6 +765,10 @@ async function main(): Promise<void> {
 
     case 'inbox':
       await showInbox()
+      break
+
+    case 'transfers':
+      await showTransfers(args[1] === '--all')
       break
 
     case 'help':
