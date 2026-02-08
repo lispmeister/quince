@@ -1,17 +1,30 @@
-# quince - Agent First SMTP MTA 
+# quince — The Agent-First MTA
 
 ![quince](docs/images/Vincent_van_Gogh_-_Still_Life_with_Quinces_-_Google_Art_Project.jpg)
 
 ## Overview
 
-quince enables agent communication via SMTP over a P2P transport layer. Connect your agents via SMTP and POP3, and messages are delivered over encrypted Pear network channels using public key identities.
-quince also supports legacy MUA clients for mere humans.
+Autonomous agents need infrastructure that takes authentication, non-repudiation, and privacy seriously. Traditional email doesn't. Quince is a decentralized SMTP mail transfer agent built for the agent era — where every message is cryptographically signed, every connection is encrypted end-to-end, and large files transfer directly between peers without touching a central server.
 
-**How it works:**
+Agents like [OpenClaw](https://x.com/openclaw) need to communicate reliably, prove who sent what, and move data fast. Quince delivers on all of that over the [Pear](https://pears.com/) P2P network. Humans can use it too — any standard mail client works.
 
-1. Your agent sends mail via SMTP to localhost → quince signs it and delivers over Hyperswarm
-2. Incoming mail arrives over Hyperswarm → quince verifies the signature and stores it in the inbox
-3. Your agent retrieves mail via POP3 from localhost
+### Why Quince?
+
+| Capability | How |
+|---|---|
+| **Strong authentication** | Ed25519 keypair identity per daemon — no passwords, no tokens, no CA |
+| **Non-repudiation** | Every message is BLAKE2b-hashed and Ed25519-signed. Recipients verify automatically |
+| **High-bandwidth file transfer** | Hyperdrive: chunked, verified, resumable P2P transfers — no MIME base64 bloat |
+| **Privacy** | Hyperswarm encrypted transport, mutual whitelist, per-peer drive isolation |
+| **Zero infrastructure** | No DNS, no mail servers, no cloud. Two daemons, two keys, done |
+
+### How it works
+
+1. Your agent sends mail via SMTP to `localhost` → quince signs it and delivers over Hyperswarm
+2. Incoming mail arrives over Hyperswarm → quince verifies the signature and stores it
+3. Your agent retrieves mail via POP3 from `localhost`
+
+Standard SMTP/POP3 on the local side. Encrypted P2P on the wire. Your agent doesn't need a new SDK — if it can send email, it can use quince.
 
 ## Quick Start
 
@@ -208,16 +221,16 @@ quince validates that the file exists (rejecting the email with a `550` if not),
 
 ### Receiving a file
 
-Files arrive automatically in `~/.quince/media/<sender-alias>/`:
+Files arrive automatically in `~/.quince/media/<sender-pubkey>/`:
 
 ```
-~/.quince/media/alice/photo.jpg
+~/.quince/media/b56b17b7.../photo.jpg
 ```
 
 The email in your inbox is rewritten to show the local path:
 
 ```
-Hey Bob, check out this photo: [photo.jpg — 10.0 MB] → ~/.quince/media/alice/photo.jpg
+Hey Bob, check out this photo: [photo.jpg — 10.0 MB] → ~/.quince/media/b56b17b7.../photo.jpg
 ```
 
 The text arrives instantly. The file may take longer depending on size and connection. Use `quince transfers` to check progress.
@@ -248,6 +261,62 @@ Outbound messages are signed with your Ed25519 key. The signature is a BLAKE2b h
 | `quince queue clear` | Clear message queue |
 | `quince transfers` | Show active file transfers |
 | `quince transfers --all` | Show all transfers (including completed) |
+
+## Agent Integration
+
+Quince speaks standard SMTP and POP3. Any agent that can send email can use quince — no custom SDK required.
+
+### Connecting your agent
+
+1. **Start quince** on the machine where your agent runs:
+
+```bash
+quince start
+```
+
+2. **Configure your agent's SMTP** to point at localhost:
+
+```
+SMTP host: 127.0.0.1
+SMTP port: 2525
+Auth:      none
+TLS:       none
+```
+
+3. **Configure your agent's POP3** to poll for incoming mail:
+
+```
+POP3 host: 127.0.0.1
+POP3 port: 1110
+Username:  <your-configured-username>
+Password:  <anything>
+TLS:       none
+```
+
+4. **Exchange keys** with the peer agent's quince daemon:
+
+```bash
+quince add-peer other-agent <their-pubkey>
+```
+
+The peer operator does the same with your pubkey. Once both sides whitelist each other, messages flow.
+
+### Example: OpenClaw agent
+
+[OpenClaw](https://x.com/openclaw) agents can use quince as their communication backbone. Point OpenClaw's mailer at quince's localhost SMTP/POP3 and every message gets:
+
+- **Signed** — Ed25519 signature proves which agent sent it (non-repudiation)
+- **Verified** — receiving agent can cryptographically confirm the sender
+- **Encrypted** — Hyperswarm Noise protocol on the wire, no cleartext
+- **Whitelisted** — only pre-approved peers can connect (no spam, no impersonation)
+
+To send files between agents, drop them in `~/.quince/media/` and reference them in the email body as `quince:/media/<filename>`. The file transfers over Hyperdrive — chunked, verified, resumable — without touching SMTP.
+
+### Why SMTP?
+
+Every programming language has an SMTP library. Python's `smtplib`, Node's `nodemailer`, Go's `net/smtp` — they all work out of the box. Your agent doesn't need to learn a new protocol or install a new dependency. Send an email to localhost, quince handles the rest: signing, encryption, P2P delivery, and retry.
+
+POP3 is equally universal for reading mail. Poll `127.0.0.1:1110` and your agent gets verified, authenticated messages from known peers.
 
 ## Environment Variables
 
@@ -289,7 +358,7 @@ Spins up two full daemon instances (ALICE and BOB) with Hyperswarm to test real 
   inbox/          # Received messages (.eml) and index
   queue/          # Outbound message queue
   media/          # Files for sending (user-managed)
-  media/<alias>/  # Received files (per-sender)
+  media/<pubkey>/  # Received files (per-sender)
   drives/         # Hyperdrive storage (Corestore internals)
   transfers.json  # File transfer state
 ```
