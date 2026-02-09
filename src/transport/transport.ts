@@ -1,11 +1,12 @@
 import { EventEmitter } from 'bare-events'
 import Hyperswarm, { type Peer, type PeerInfo, type Discovery } from 'hyperswarm'
 import b4a from 'b4a'
-import type { PeerPacket, PeerMessage, PeerAck, PeerIdentify, PeerFileOffer, PeerFileRequest, PeerFileComplete } from './types.js'
+import type { PeerPacket, PeerMessage, PeerAck, PeerIdentify, PeerFileOffer, PeerFileRequest, PeerFileComplete, PeerStatus, PeerIntroduction, PeerCapabilities } from './types.js'
 import type { Identity } from '../identity.js'
 
 export interface TransportConfig {
   whitelist?: Set<string>  // allowed peer pubkeys (lowercase)
+  capabilities?: PeerCapabilities
 }
 
 export interface TransportEvents {
@@ -13,6 +14,8 @@ export interface TransportEvents {
   'peer-connected': (pubkey: string) => void
   'peer-disconnected': (pubkey: string) => void
   'peer-rejected': (pubkey: string) => void  // not on whitelist
+  'peer-status': (pubkey: string, status: PeerStatus) => void
+  'introduction': (introduction: PeerIntroduction, senderPubkey: string) => void
 }
 
 interface PendingAck {
@@ -25,6 +28,20 @@ interface PeerConnection {
   peer: Peer
   identityPubkey: string | null  // null until IDENTIFY received
   buffer: string
+  connectedAt: number
+  capabilities: PeerCapabilities | null
+  lastMessageAt: number
+  status: PeerStatus['status'] | null
+  statusMessage: string | undefined
+}
+
+export interface PeerConnectionInfo {
+  pubkey: string
+  connectedAt: number
+  capabilities: PeerCapabilities | null
+  lastMessageAt: number
+  status: PeerStatus['status'] | null
+  statusMessage: string | undefined
 }
 
 export class Transport extends EventEmitter {
@@ -36,6 +53,8 @@ export class Transport extends EventEmitter {
   private connections: Map<Peer, PeerConnection> = new Map()  // raw connections
   private peersByIdentity: Map<string, Peer> = new Map()      // identity pubkey -> peer
   private pendingAcks: Map<string, PendingAck> = new Map()
+  private currentStatus: PeerStatus['status'] = 'available'
+  private currentStatusMessage: string | undefined
 
   constructor(identity: Identity, config: TransportConfig = {}) {
     super()
@@ -61,7 +80,12 @@ export class Transport extends EventEmitter {
     const conn: PeerConnection = {
       peer,
       identityPubkey: null,
-      buffer: ''
+      buffer: '',
+      connectedAt: Date.now(),
+      capabilities: null,
+      lastMessageAt: 0,
+      status: null,
+      statusMessage: undefined
     }
     this.connections.set(peer, conn)
 
@@ -85,6 +109,9 @@ export class Transport extends EventEmitter {
     const packet: PeerIdentify = {
       type: 'IDENTIFY',
       publicKey: this.identity.publicKey
+    }
+    if (this.config.capabilities) {
+      packet.capabilities = this.config.capabilities
     }
     const line = JSON.stringify(packet) + '\n'
     peer.write(line)
@@ -127,6 +154,7 @@ export class Transport extends EventEmitter {
         this.emit('peer-rejected', conn.identityPubkey)
         return
       }
+      conn.lastMessageAt = Date.now()
       this.emit('message', packet as PeerMessage, conn.identityPubkey)
     } else if (packet.type === 'ACK') {
       const pending = this.pendingAcks.get(packet.id)
@@ -148,6 +176,25 @@ export class Transport extends EventEmitter {
         : packet.type === 'FILE_REQUEST' ? 'file-request'
         : 'file-complete'
       this.emit(eventName, packet, conn.identityPubkey)
+    } else if (packet.type === 'STATUS') {
+      if (!conn.identityPubkey) {
+        console.error('Received STATUS before IDENTIFY')
+        return
+      }
+      const statusPacket = packet as PeerStatus
+      conn.status = statusPacket.status
+      conn.statusMessage = statusPacket.message
+      this.emit('peer-status', conn.identityPubkey, statusPacket)
+    } else if (packet.type === 'INTRODUCTION') {
+      if (!conn.identityPubkey) {
+        console.error('Received INTRODUCTION before IDENTIFY')
+        return
+      }
+      if (this.config.whitelist && !this.config.whitelist.has(conn.identityPubkey)) {
+        console.log(`INTRODUCTION rejected (sender not on whitelist): ${conn.identityPubkey.slice(0, 16)}...`)
+        return
+      }
+      this.emit('introduction', packet as PeerIntroduction, conn.identityPubkey)
     }
   }
 
@@ -172,10 +219,16 @@ export class Transport extends EventEmitter {
 
     // Store the identity mapping (whitelist checked on MESSAGE, not here)
     conn.identityPubkey = pubkey
+    conn.capabilities = packet.capabilities ?? null
     this.peersByIdentity.set(pubkey, peer)
 
     console.log(`Peer identified: ${pubkey.slice(0, 16)}...`)
     this.emit('peer-connected', pubkey)
+
+    // Send our current status to the newly identified peer
+    if (this.currentStatus !== 'available' || this.currentStatusMessage) {
+      this.sendStatusToPeer(peer)
+    }
   }
 
   private handleDisconnect(peer: Peer): void {
@@ -282,6 +335,41 @@ export class Transport extends EventEmitter {
     peer.write(JSON.stringify(complete) + '\n')
   }
 
+  sendIntroduction(recipientPubkey: string, introduction: PeerIntroduction): void {
+    const peer = this.peersByIdentity.get(recipientPubkey)
+    if (!peer) {
+      console.error(`Cannot send INTRODUCTION, peer not connected: ${recipientPubkey.slice(0, 16)}...`)
+      return
+    }
+    peer.write(JSON.stringify(introduction) + '\n')
+  }
+
+  setStatus(status: PeerStatus['status'], message?: string): void {
+    this.currentStatus = status
+    this.currentStatusMessage = message
+
+    // Broadcast to all connected peers
+    const packet: PeerStatus = { type: 'STATUS', status }
+    if (message) packet.message = message
+    const line = JSON.stringify(packet) + '\n'
+
+    for (const [, conn] of this.connections) {
+      if (conn.identityPubkey) {
+        conn.peer.write(line)
+      }
+    }
+  }
+
+  private sendStatusToPeer(peer: Peer): void {
+    const packet: PeerStatus = { type: 'STATUS', status: this.currentStatus }
+    if (this.currentStatusMessage) packet.message = this.currentStatusMessage
+    peer.write(JSON.stringify(packet) + '\n')
+  }
+
+  getOwnStatus(): { status: PeerStatus['status']; message?: string } {
+    return { status: this.currentStatus, message: this.currentStatusMessage }
+  }
+
   getPeer(pubkey: string): Peer | undefined {
     return this.peersByIdentity.get(pubkey)
   }
@@ -292,6 +380,23 @@ export class Transport extends EventEmitter {
 
   getConnectedPeers(): string[] {
     return Array.from(this.peersByIdentity.keys())
+  }
+
+  getPeerConnectionInfo(pubkey: string): PeerConnectionInfo | null {
+    const peer = this.peersByIdentity.get(pubkey)
+    if (!peer) return null
+
+    const conn = this.connections.get(peer)
+    if (!conn) return null
+
+    return {
+      pubkey: conn.identityPubkey!,
+      connectedAt: conn.connectedAt,
+      capabilities: conn.capabilities,
+      lastMessageAt: conn.lastMessageAt,
+      status: conn.status,
+      statusMessage: conn.statusMessage
+    }
   }
 
   get peerCount(): number {

@@ -12,9 +12,14 @@ import {
   handleSend,
   handleListPeers,
   handlePeerStatus,
+  handleSetStatus,
   handleIdentity,
   handleTransfers,
   handleMedia,
+  handleListIntroductions,
+  handleAcceptIntroduction,
+  handleRejectIntroduction,
+  handleSendIntroduction,
   guessContentType
 } from '../src/http/handlers.js'
 
@@ -83,10 +88,20 @@ function makeContext(overrides: Partial<HttpContext> = {}): HttpContext {
     getMessage: (id: string) => messages.find(m => m.id === id) ?? null,
     getMessageContent: (entry: InboxEntry) => `From: test\r\nSubject: ${entry.subject}\r\n\r\nBody of ${entry.id}`,
     deleteMessage: (_entry: InboxEntry) => {},
-    sendMessage: async (_to, _subject, _body) => ({ id: 'new-msg-1', queued: false }),
+    sendMessage: async (_to, _subject, _body) => ({ id: 'new-msg-1', queued: false, messageId: '<new-msg-1@quincemail.com>' }),
     transport: {
       isPeerConnected: (pk: string) => pk === ALICE_PUBKEY,
-      getConnectedPeers: () => [ALICE_PUBKEY]
+      getConnectedPeers: () => [ALICE_PUBKEY],
+      getPeerConnectionInfo: (pk: string) => pk === ALICE_PUBKEY ? {
+        pubkey: ALICE_PUBKEY,
+        connectedAt: 1700000000000,
+        capabilities: { name: 'test-agent', version: '1.0' },
+        lastMessageAt: 1700000001000,
+        status: 'available' as const,
+        statusMessage: undefined
+      } : null,
+      setStatus: () => {},
+      sendIntroduction: () => {}
     } as any,
     transferManager: {} as any,
     getTransfers: () => [],
@@ -104,6 +119,10 @@ function makeContext(overrides: Partial<HttpContext> = {}): HttpContext {
         return null
       }
     },
+    getIntroductions: () => [],
+    acceptIntroduction: (_pubkey: string) => null,
+    rejectIntroduction: (_pubkey: string) => null,
+    signIntroduction: (_introduced: Record<string, unknown>) => 'a'.repeat(128),
     ...overrides
   }
 }
@@ -390,5 +409,226 @@ describe('handleMedia', () => {
     const res = handleMedia(makeRequest(), { '*': 'sub/photo.jpg' }, ctx)
     expect(res.status).toBe(200)
     expect(res.headers['content-type']).toBe('image/jpeg')
+  })
+})
+
+// --- M12: in-reply-to filter ---
+
+describe('handleListInbox in-reply-to filter', () => {
+  test('filters by in-reply-to', () => {
+    const ctx = makeContext()
+    const res = handleListInbox(makeRequest({ query: { 'in-reply-to': '<thread-1>' } }), {}, ctx)
+    const data = JSON.parse(res.body)
+    // Only msg-4 has inReplyTo=<thread-1>
+    expect(data.messages).toHaveLength(1)
+    expect(data.messages[0].id).toBe('msg-4')
+  })
+
+  test('returns empty when no matches', () => {
+    const ctx = makeContext()
+    const res = handleListInbox(makeRequest({ query: { 'in-reply-to': '<nonexistent>' } }), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.messages).toHaveLength(0)
+  })
+})
+
+// --- M12: handleSend returns messageId ---
+
+describe('handleSend messageId', () => {
+  test('returns messageId in response', async () => {
+    const ctx = makeContext()
+    const req = makeRequest({
+      body: JSON.stringify({ to: `alice@${ALICE_PUBKEY}.quincemail.com`, subject: 'Hi', body: 'Hello' })
+    })
+    const res = await handleSend(req, {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.messageId).toBe('<new-msg-1@quincemail.com>')
+  })
+})
+
+// --- M13: Capabilities in peers response ---
+
+describe('handleListPeers with capabilities', () => {
+  test('includes capabilities for connected peers', () => {
+    const ctx = makeContext()
+    const res = handleListPeers(makeRequest(), {}, ctx)
+    const data = JSON.parse(res.body)
+    const alice = data.peers.find((p: any) => p.alias === 'alice')
+    expect(alice.capabilities).toEqual({ name: 'test-agent', version: '1.0' })
+    expect(alice.status).toBe('available')
+  })
+
+  test('returns null capabilities for offline peers', () => {
+    const ctx = makeContext()
+    const res = handleListPeers(makeRequest(), {}, ctx)
+    const data = JSON.parse(res.body)
+    const bob = data.peers.find((p: any) => p.alias === 'bob')
+    expect(bob.capabilities).toBeNull()
+    expect(bob.status).toBeNull()
+  })
+})
+
+// --- M13: Peer status endpoint ---
+
+describe('handlePeerStatus with extended info', () => {
+  test('includes connectedSince, capabilities, status for connected peer', () => {
+    const ctx = makeContext()
+    const res = handlePeerStatus(makeRequest(), { pubkey: ALICE_PUBKEY }, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.connectedSince).toBe(1700000000000)
+    expect(data.lastMessageAt).toBe(1700000001000)
+    expect(data.capabilities).toEqual({ name: 'test-agent', version: '1.0' })
+    expect(data.status).toBe('available')
+  })
+})
+
+// --- M13: Set status ---
+
+describe('handleSetStatus', () => {
+  test('accepts valid status', () => {
+    const ctx = makeContext()
+    const req = makeRequest({ body: JSON.stringify({ status: 'busy', message: 'In a meeting' }) })
+    const res = handleSetStatus(req, {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.status).toBe('busy')
+    expect(data.message).toBe('In a meeting')
+  })
+
+  test('rejects invalid status', () => {
+    const ctx = makeContext()
+    const req = makeRequest({ body: JSON.stringify({ status: 'invalid' }) })
+    const res = handleSetStatus(req, {}, ctx)
+    expect(res.status).toBe(400)
+  })
+
+  test('rejects missing status', () => {
+    const ctx = makeContext()
+    const req = makeRequest({ body: JSON.stringify({}) })
+    const res = handleSetStatus(req, {}, ctx)
+    expect(res.status).toBe(400)
+  })
+
+  test('rejects invalid JSON', () => {
+    const ctx = makeContext()
+    const req = makeRequest({ body: 'not json' })
+    const res = handleSetStatus(req, {}, ctx)
+    expect(res.status).toBe(400)
+  })
+})
+
+// --- M13: Introductions ---
+
+describe('handleListIntroductions', () => {
+  test('returns empty list by default', () => {
+    const ctx = makeContext()
+    const res = handleListIntroductions(makeRequest(), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.introductions).toEqual([])
+  })
+
+  test('returns introductions from context', () => {
+    const ctx = makeContext({
+      getIntroductions: () => [{
+        pubkey: 'c'.repeat(64),
+        alias: 'carol',
+        introducerPubkey: ALICE_PUBKEY,
+        introducerAlias: 'alice',
+        signature: 'a'.repeat(128),
+        receivedAt: 1700000000000,
+        status: 'pending'
+      }]
+    })
+    const res = handleListIntroductions(makeRequest(), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.introductions).toHaveLength(1)
+    expect(data.introductions[0].alias).toBe('carol')
+  })
+})
+
+describe('handleAcceptIntroduction', () => {
+  test('returns 404 when no pending introduction', () => {
+    const ctx = makeContext()
+    const res = handleAcceptIntroduction(makeRequest(), { pubkey: 'c'.repeat(64) }, ctx)
+    expect(res.status).toBe(404)
+  })
+
+  test('returns accepted intro', () => {
+    const intro = {
+      pubkey: 'c'.repeat(64),
+      alias: 'carol',
+      introducerPubkey: ALICE_PUBKEY,
+      signature: 'a'.repeat(128),
+      receivedAt: 1700000000000,
+      status: 'accepted'
+    }
+    const ctx = makeContext({
+      acceptIntroduction: (pk: string) => pk === 'c'.repeat(64) ? intro : null
+    })
+    const res = handleAcceptIntroduction(makeRequest(), { pubkey: 'c'.repeat(64) }, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.accepted).toBe(true)
+    expect(data.alias).toBe('carol')
+  })
+})
+
+describe('handleRejectIntroduction', () => {
+  test('returns 404 when no pending introduction', () => {
+    const ctx = makeContext()
+    const res = handleRejectIntroduction(makeRequest(), { pubkey: 'c'.repeat(64) }, ctx)
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('handleSendIntroduction', () => {
+  test('rejects invalid JSON', () => {
+    const ctx = makeContext()
+    const req = makeRequest({ body: 'not json' })
+    const res = handleSendIntroduction(req, { pubkey: ALICE_PUBKEY }, ctx)
+    expect(res.status).toBe(400)
+  })
+
+  test('rejects missing pubkey', () => {
+    const ctx = makeContext()
+    const req = makeRequest({ body: JSON.stringify({ alias: 'carol' }) })
+    const res = handleSendIntroduction(req, { pubkey: ALICE_PUBKEY }, ctx)
+    expect(res.status).toBe(400)
+  })
+
+  test('rejects invalid pubkey format', () => {
+    const ctx = makeContext()
+    const req = makeRequest({ body: JSON.stringify({ pubkey: 'not-valid' }) })
+    const res = handleSendIntroduction(req, { pubkey: ALICE_PUBKEY }, ctx)
+    expect(res.status).toBe(400)
+  })
+
+  test('rejects when recipient not connected', () => {
+    const ctx = makeContext()
+    const req = makeRequest({ body: JSON.stringify({ pubkey: 'c'.repeat(64) }) })
+    // BOB_PUBKEY is not connected in mock
+    const res = handleSendIntroduction(req, { pubkey: BOB_PUBKEY }, ctx)
+    expect(res.status).toBe(422)
+  })
+
+  test('sends introduction to connected peer', () => {
+    let sentIntro: any = null
+    const ctx = makeContext({
+      transport: {
+        isPeerConnected: (pk: string) => pk === ALICE_PUBKEY,
+        getConnectedPeers: () => [ALICE_PUBKEY],
+        getPeerConnectionInfo: () => null,
+        setStatus: () => {},
+        sendIntroduction: (_pk: string, intro: any) => { sentIntro = intro }
+      } as any
+    })
+    const req = makeRequest({
+      body: JSON.stringify({ pubkey: 'c'.repeat(64), alias: 'carol', message: 'Meet Carol' })
+    })
+    const res = handleSendIntroduction(req, { pubkey: ALICE_PUBKEY }, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.sent).toBe(true)
+    expect(data.introduced.pubkey).toBe('c'.repeat(64))
+    expect(data.introduced.alias).toBe('carol')
+    expect(sentIntro).not.toBeNull()
+    expect(sentIntro.type).toBe('INTRODUCTION')
   })
 })

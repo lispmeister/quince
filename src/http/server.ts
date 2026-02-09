@@ -10,9 +10,14 @@ import {
   handleSend,
   handleListPeers,
   handlePeerStatus,
+  handleSetStatus,
   handleIdentity,
   handleTransfers,
-  handleMedia
+  handleMedia,
+  handleListIntroductions,
+  handleAcceptIntroduction,
+  handleRejectIntroduction,
+  handleSendIntroduction
 } from './handlers.js'
 
 export interface HttpServerConfig {
@@ -47,8 +52,13 @@ export class HttpServer {
     this.router.add('POST', '/api/send', wrap(handleSend))
     this.router.add('GET', '/api/peers', wrap(handleListPeers))
     this.router.add('GET', '/api/peers/:pubkey/status', wrap(handlePeerStatus))
+    this.router.add('POST', '/api/peers/:pubkey/introduce', wrap(handleSendIntroduction))
+    this.router.add('POST', '/api/status', wrap(handleSetStatus))
     this.router.add('GET', '/api/identity', wrap(handleIdentity))
     this.router.add('GET', '/api/transfers', wrap(handleTransfers))
+    this.router.add('GET', '/api/introductions', wrap(handleListIntroductions))
+    this.router.add('POST', '/api/introductions/:pubkey/accept', wrap(handleAcceptIntroduction))
+    this.router.add('DELETE', '/api/introductions/:pubkey', wrap(handleRejectIntroduction))
     this.router.add('GET', '/media/*', wrap(handleMedia))
   }
 

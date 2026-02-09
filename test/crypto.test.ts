@@ -1,7 +1,7 @@
 import { test, expect, describe } from 'bun:test'
 import crypto from 'hypercore-crypto'
 import b4a from 'b4a'
-import { signMessage, verifyMessage } from '../src/crypto.js'
+import { signMessage, verifyMessage, signIntroduction, verifyIntroduction } from '../src/crypto.js'
 
 function makeKeyPair() {
   const kp = (crypto as any).keyPair()
@@ -102,5 +102,49 @@ describe('verifyMessage', () => {
 
     expect(mime).toContain('X-Quince-Signature')
     expect(mime).toBe(signed)
+  })
+})
+
+describe('signIntroduction', () => {
+  test('produces 128-char hex signature', () => {
+    const alice = makeKeyPair()
+    const introduced = { pubkey: 'b'.repeat(64), alias: 'bob' }
+    const sig = signIntroduction(introduced, alice.secretKey)
+    expect(sig).toMatch(/^[a-f0-9]{128}$/)
+  })
+})
+
+describe('verifyIntroduction', () => {
+  test('valid signature returns true', () => {
+    const alice = makeKeyPair()
+    const introduced = { pubkey: 'b'.repeat(64), alias: 'bob' }
+    const sig = signIntroduction(introduced, alice.secretKey)
+    const valid = verifyIntroduction(introduced, sig, alice.publicKey)
+    expect(valid).toBe(true)
+  })
+
+  test('wrong key returns false', () => {
+    const alice = makeKeyPair()
+    const bob = makeKeyPair()
+    const introduced = { pubkey: 'c'.repeat(64), alias: 'carol' }
+    const sig = signIntroduction(introduced, alice.secretKey)
+    const valid = verifyIntroduction(introduced, sig, bob.publicKey)
+    expect(valid).toBe(false)
+  })
+
+  test('tampered data returns false', () => {
+    const alice = makeKeyPair()
+    const introduced = { pubkey: 'b'.repeat(64), alias: 'bob' }
+    const sig = signIntroduction(introduced, alice.secretKey)
+    const tampered = { pubkey: 'c'.repeat(64), alias: 'bob' }
+    const valid = verifyIntroduction(tampered, sig, alice.publicKey)
+    expect(valid).toBe(false)
+  })
+
+  test('malformed signature returns false', () => {
+    const alice = makeKeyPair()
+    const introduced = { pubkey: 'b'.repeat(64) }
+    const valid = verifyIntroduction(introduced, 'not-valid-hex', alice.publicKey)
+    expect(valid).toBe(false)
   })
 })

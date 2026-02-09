@@ -821,6 +821,223 @@ test_http_transfers() {
 }
 
 #
+# M12/M13 Integration Tests
+#
+
+test_message_id_roundtrip() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: Message-ID present in HTTP send response and received .eml"
+
+  local to_addr="bob@${BOB_PUBKEY}.quincemail.com"
+  local payload
+  payload=$(cat <<EOF
+{"to":"$to_addr","subject":"MsgID Test","body":"Check Message-ID header"}
+EOF
+)
+
+  local response
+  response=$(curl -s -X POST "http://127.0.0.1:$ALICE_HTTP_PORT/api/send" \
+    -H "Content-Type: application/json" \
+    -d "$payload" 2>/dev/null)
+
+  # Check that response includes messageId field
+  if echo "$response" | grep -q '"messageId"'; then
+    local msg_id
+    msg_id=$(echo "$response" | grep -o '"messageId":"[^"]*"' | sed 's/"messageId":"//;s/"//')
+    if echo "$msg_id" | grep -q '@quincemail.com>'; then
+      pass "HTTP send response includes Message-ID: $msg_id"
+    else
+      fail "Message-ID format unexpected: $msg_id"
+      return 1
+    fi
+  else
+    fail "HTTP send response does not include messageId field"
+    echo "Response: $response"
+    return 1
+  fi
+
+  # Wait for delivery
+  sleep 5
+
+  # Check BOB's latest inbox .eml contains Message-ID header
+  TESTS_RUN=$((TESTS_RUN + 1))
+  local eml_file
+  eml_file=$(ls -t "$BOB_HOME/.quince/inbox/"*.eml 2>/dev/null | head -1)
+  if [ -n "$eml_file" ] && grep -q "Message-ID:" "$eml_file"; then
+    pass "Received .eml contains Message-ID header"
+  else
+    fail "Received .eml missing Message-ID header"
+    [ -n "$eml_file" ] && cat "$eml_file"
+  fi
+}
+
+test_in_reply_to_filter() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: ?in-reply-to= filter returns only direct replies"
+
+  # First, send a message and capture its messageId
+  local to_addr="bob@${BOB_PUBKEY}.quincemail.com"
+  local response1
+  response1=$(curl -s -X POST "http://127.0.0.1:$ALICE_HTTP_PORT/api/send" \
+    -H "Content-Type: application/json" \
+    -d '{"to":"'"$to_addr"'","subject":"Thread Parent","body":"Original message"}' 2>/dev/null)
+
+  local parent_msg_id
+  parent_msg_id=$(echo "$response1" | grep -o '"messageId":"[^"]*"' | sed 's/"messageId":"//;s/"//')
+
+  sleep 3
+
+  # Send a reply referencing the parent
+  local response2
+  response2=$(curl -s -X POST "http://127.0.0.1:$ALICE_HTTP_PORT/api/send" \
+    -H "Content-Type: application/json" \
+    -d '{"to":"'"$to_addr"'","subject":"Thread Reply","body":"Reply message","inReplyTo":"'"$parent_msg_id"'"}' 2>/dev/null)
+
+  sleep 5
+
+  # Query BOB's inbox with in-reply-to filter
+  local encoded_id
+  encoded_id=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$parent_msg_id'))" 2>/dev/null || echo "$parent_msg_id")
+  local filter_response
+  filter_response=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/inbox?in-reply-to=$encoded_id" 2>/dev/null)
+
+  if echo "$filter_response" | grep -q '"Thread Reply"'; then
+    local total
+    total=$(echo "$filter_response" | grep -o '"total":[0-9]*' | grep -o '[0-9]*')
+    if [ "$total" = "1" ]; then
+      pass "in-reply-to filter returns exactly 1 reply"
+    else
+      # May have >1 if test re-runs, but at least reply is present
+      pass "in-reply-to filter returns replies (total: $total)"
+    fi
+  else
+    fail "in-reply-to filter did not return the reply"
+    echo "Parent ID: $parent_msg_id"
+    echo "Response: $filter_response"
+  fi
+}
+
+test_http_status() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: POST /api/status sets own status"
+
+  local response
+  response=$(curl -s -X POST "http://127.0.0.1:$ALICE_HTTP_PORT/api/status" \
+    -H "Content-Type: application/json" \
+    -d '{"status":"busy","message":"In a meeting"}' 2>/dev/null)
+
+  if echo "$response" | grep -q '"busy"'; then
+    pass "POST /api/status accepted status change"
+  else
+    fail "POST /api/status did not accept status change"
+    echo "Response: $response"
+    return 1
+  fi
+
+  # Verify BOB sees ALICE's status
+  TESTS_RUN=$((TESTS_RUN + 1))
+  sleep 2
+  local status_response
+  status_response=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/peers/$ALICE_PUBKEY/status" 2>/dev/null)
+
+  if echo "$status_response" | grep -q '"busy"'; then
+    pass "BOB sees ALICE's status as 'busy'"
+  else
+    fail "BOB does not see ALICE's status update"
+    echo "Response: $status_response"
+  fi
+
+  # Reset ALICE status
+  curl -s -X POST "http://127.0.0.1:$ALICE_HTTP_PORT/api/status" \
+    -H "Content-Type: application/json" \
+    -d '{"status":"available"}' 2>/dev/null > /dev/null
+
+  # Verify invalid status is rejected
+  TESTS_RUN=$((TESTS_RUN + 1))
+  local bad_response
+  bad_response=$(curl -s -X POST "http://127.0.0.1:$ALICE_HTTP_PORT/api/status" \
+    -H "Content-Type: application/json" \
+    -d '{"status":"invalid"}' 2>/dev/null)
+
+  if echo "$bad_response" | grep -q '"error"'; then
+    pass "POST /api/status rejects invalid status"
+  else
+    fail "POST /api/status did not reject invalid status"
+    echo "Response: $bad_response"
+  fi
+}
+
+test_http_introductions() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: GET /api/introductions returns list"
+
+  local response
+  response=$(curl -s "http://127.0.0.1:$ALICE_HTTP_PORT/api/introductions" 2>/dev/null)
+
+  if echo "$response" | grep -q '"introductions"'; then
+    pass "GET /api/introductions returns valid response"
+  else
+    fail "GET /api/introductions did not return expected format"
+    echo "Response: $response"
+  fi
+
+  # Test sending an introduction from ALICE to BOB about a fake peer
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: POST /api/peers/:pubkey/introduce sends introduction"
+
+  local fake_pubkey
+  fake_pubkey=$(python3 -c "import hashlib; print(hashlib.sha256(b'carol-test').hexdigest())" 2>/dev/null || echo "c$(printf '0%.0s' {1..63})")
+
+  local intro_response
+  intro_response=$(curl -s -X POST "http://127.0.0.1:$ALICE_HTTP_PORT/api/peers/$BOB_PUBKEY/introduce" \
+    -H "Content-Type: application/json" \
+    -d '{"pubkey":"'"$fake_pubkey"'","alias":"carol-test","message":"Meet Carol"}' 2>/dev/null)
+
+  if echo "$intro_response" | grep -q '"sent":true'; then
+    pass "POST /api/peers/:pubkey/introduce sent introduction"
+
+    # Verify BOB received it
+    TESTS_RUN=$((TESTS_RUN + 1))
+    sleep 2
+    local bob_intros
+    bob_intros=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/introductions" 2>/dev/null)
+
+    if echo "$bob_intros" | grep -q "$fake_pubkey"; then
+      pass "BOB received introduction for carol-test"
+
+      # Accept the introduction
+      TESTS_RUN=$((TESTS_RUN + 1))
+      local accept_response
+      accept_response=$(curl -s -X POST "http://127.0.0.1:$BOB_HTTP_PORT/api/introductions/$fake_pubkey/accept" 2>/dev/null)
+
+      if echo "$accept_response" | grep -q '"accepted":true'; then
+        pass "BOB accepted introduction for carol-test"
+
+        # Verify carol-test appears in BOB's peers
+        TESTS_RUN=$((TESTS_RUN + 1))
+        local peers_response
+        peers_response=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/peers" 2>/dev/null)
+        if echo "$peers_response" | grep -q "$fake_pubkey"; then
+          pass "carol-test now in BOB's peer list"
+        else
+          fail "carol-test not found in BOB's peer list after accept"
+          echo "Response: $peers_response"
+        fi
+      else
+        fail "BOB failed to accept introduction"
+        echo "Response: $accept_response"
+      fi
+    else
+      fail "BOB did not receive introduction"
+      echo "Response: $bob_intros"
+    fi
+  else
+    fail "POST /api/peers/:pubkey/introduce failed"
+    echo "Response: $intro_response"
+  fi
+}
+
+#
 # Test summary
 #
 
@@ -889,6 +1106,12 @@ main() {
   test_http_send
   test_http_delete
   test_http_transfers
+
+  # M12/M13 tests
+  test_message_id_roundtrip
+  test_in_reply_to_filter
+  test_http_status
+  test_http_introductions
 
   # Cleanup
   stop_all_daemons

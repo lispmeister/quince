@@ -9,6 +9,7 @@ export interface Config {
   pop3Port?: number
   httpPort?: number
   peers?: Record<string, string>  // alias -> pubkey
+  trustIntroductions?: Record<string, boolean>  // alias -> whether to auto-accept their introductions
 }
 
 export interface ConfigValidationError {
@@ -100,6 +101,19 @@ export function validateConfig(config: unknown): ConfigValidationError[] {
     }
   }
 
+  if (c.trustIntroductions !== undefined) {
+    if (typeof c.trustIntroductions !== 'object' || c.trustIntroductions === null || Array.isArray(c.trustIntroductions)) {
+      errors.push({ field: 'trustIntroductions', message: 'trustIntroductions must be an object' })
+    } else {
+      const trust = c.trustIntroductions as Record<string, unknown>
+      for (const [alias, value] of Object.entries(trust)) {
+        if (typeof value !== 'boolean') {
+          errors.push({ field: `trustIntroductions.${alias}`, message: 'Value must be a boolean' })
+        }
+      }
+    }
+  }
+
   return errors
 }
 
@@ -144,6 +158,18 @@ export function loadConfig(): Config {
           }
           if (Object.keys(validPeers).length > 0) {
             config.peers = validPeers
+          }
+        }
+        // Keep valid trustIntroductions entries
+        if (typeof parsed.trustIntroductions === 'object' && parsed.trustIntroductions !== null && !Array.isArray(parsed.trustIntroductions)) {
+          const validTrust: Record<string, boolean> = {}
+          for (const [alias, value] of Object.entries(parsed.trustIntroductions as Record<string, unknown>)) {
+            if (typeof value === 'boolean') {
+              validTrust[alias] = value
+            }
+          }
+          if (Object.keys(validTrust).length > 0) {
+            config.trustIntroductions = validTrust
           }
         }
         return config

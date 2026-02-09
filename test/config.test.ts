@@ -11,6 +11,7 @@ interface Config {
   smtpPort?: number
   pop3Port?: number
   peers?: Record<string, string>
+  trustIntroductions?: Record<string, boolean>
 }
 
 // --- Reimplemented pure functions (mirroring src/config.ts) ---
@@ -87,6 +88,19 @@ function validateConfig(config: unknown): ConfigValidationError[] {
       }
     }
   }
+  if (c.trustIntroductions !== undefined) {
+    if (typeof c.trustIntroductions !== 'object' || c.trustIntroductions === null || Array.isArray(c.trustIntroductions)) {
+      errors.push({ field: 'trustIntroductions', message: 'trustIntroductions must be an object' })
+    } else {
+      const trust = c.trustIntroductions as Record<string, unknown>
+      for (const [alias, value] of Object.entries(trust)) {
+        if (typeof value !== 'boolean') {
+          errors.push({ field: `trustIntroductions.${alias}`, message: 'Value must be a boolean' })
+        }
+      }
+    }
+  }
+
   return errors
 }
 
@@ -164,6 +178,17 @@ function loadConfig(configDir: string): Config {
           }
           if (Object.keys(validPeers).length > 0) {
             config.peers = validPeers
+          }
+        }
+        if (typeof parsed.trustIntroductions === 'object' && parsed.trustIntroductions !== null && !Array.isArray(parsed.trustIntroductions)) {
+          const validTrust: Record<string, boolean> = {}
+          for (const [alias, value] of Object.entries(parsed.trustIntroductions as Record<string, unknown>)) {
+            if (typeof value === 'boolean') {
+              validTrust[alias] = value
+            }
+          }
+          if (Object.keys(validTrust).length > 0) {
+            config.trustIntroductions = validTrust
           }
         }
         return config
@@ -457,5 +482,34 @@ describe('loadConfig with invalid placeholder values', () => {
     expect(config.smtpPort).toBeUndefined()
     expect(config.peers!['bob']).toBe(VALID_PUBKEY)
     expect(config.peers!['bad alias!']).toBeUndefined()
+  })
+})
+
+describe('trustIntroductions validation', () => {
+  test('accepts valid trustIntroductions', () => {
+    const config = { trustIntroductions: { alice: true, bob: false } }
+    expect(validateConfig(config)).toHaveLength(0)
+  })
+
+  test('rejects non-object trustIntroductions', () => {
+    expect(validateConfig({ trustIntroductions: 'not-an-object' })).not.toHaveLength(0)
+    expect(validateConfig({ trustIntroductions: [true] })).not.toHaveLength(0)
+  })
+
+  test('rejects non-boolean values', () => {
+    const config = { trustIntroductions: { alice: 'yes' } }
+    expect(validateConfig(config)).not.toHaveLength(0)
+  })
+
+  test('round-trips through save/load', () => {
+    const config: Config = {
+      trustIntroductions: { alice: true, bob: false }
+    }
+
+    const saved = saveConfig(testDir, config)
+    expect(saved).toBe(true)
+
+    const loaded = loadConfig(testDir)
+    expect(loaded.trustIntroductions).toEqual({ alice: true, bob: false })
   })
 })

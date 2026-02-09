@@ -4,9 +4,21 @@ import type { RouteParams } from './router.js'
 import type { InboxEntry } from '../inbox.js'
 import type { Config } from '../config.js'
 import type { Identity } from '../identity.js'
-import type { Transport } from '../transport/index.js'
+import type { Transport, PeerCapabilities } from '../transport/index.js'
 import type { FileTransferManager } from '../transfer/index.js'
 import type { FileTransfer } from '../transfer/types.js'
+
+export interface StoredIntroductionView {
+  pubkey: string
+  alias?: string
+  capabilities?: PeerCapabilities
+  message?: string
+  introducerPubkey: string
+  introducerAlias?: string
+  signature: string
+  receivedAt: number
+  status: string
+}
 
 export interface HttpContext {
   identity: Identity
@@ -16,11 +28,15 @@ export interface HttpContext {
   getMessage: (id: string) => InboxEntry | null
   getMessageContent: (entry: InboxEntry) => string | null
   deleteMessage: (entry: InboxEntry) => void
-  sendMessage: (to: string, subject: string, body: string, headers?: Record<string, string>) => Promise<{ id: string; queued: boolean }>
+  sendMessage: (to: string, subject: string, body: string, headers?: Record<string, string>) => Promise<{ id: string; queued: boolean; messageId: string }>
   transport: Transport
   transferManager: FileTransferManager
   getTransfers: () => FileTransfer[]
   readMediaFile: (relativePath: string) => { content: Buffer; contentType: string } | null
+  getIntroductions: () => StoredIntroductionView[]
+  acceptIntroduction: (pubkey: string) => StoredIntroductionView | null
+  rejectIntroduction: (pubkey: string) => StoredIntroductionView | null
+  signIntroduction: (introduced: Record<string, unknown>) => string
 }
 
 // --- Inbox handlers ---
@@ -30,6 +46,7 @@ export function handleListInbox(req: HttpRequest, _params: RouteParams, ctx: Htt
 
   // Filters
   const { from, after, subject, q, type, thread, limit, offset } = req.query
+  const inReplyTo = req.query['in-reply-to']
 
   if (from) {
     messages = messages.filter(m => m.senderPubkey === from || m.from.includes(from))
@@ -51,6 +68,9 @@ export function handleListInbox(req: HttpRequest, _params: RouteParams, ctx: Htt
     messages = messages.filter(m =>
       m.messageId === thread || m.inReplyTo === thread || (m.references && m.references.includes(thread))
     )
+  }
+  if (inReplyTo) {
+    messages = messages.filter(m => m.inReplyTo === inReplyTo)
   }
   if (q) {
     const lower = q.toLowerCase()
@@ -143,7 +163,12 @@ export async function handleSend(req: HttpRequest, _params: RouteParams, ctx: Ht
       payload.body ?? '',
       headers
     )
-    return jsonResponse({ sent: !result.queued, queued: result.queued, id: result.id }, result.queued ? 202 : 200)
+    return jsonResponse({
+      sent: !result.queued,
+      queued: result.queued,
+      id: result.id,
+      messageId: result.messageId
+    }, result.queued ? 202 : 200)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if (msg.includes('Unknown peer') || msg.includes('Invalid recipient')) {
@@ -157,11 +182,17 @@ export async function handleSend(req: HttpRequest, _params: RouteParams, ctx: Ht
 
 export function handleListPeers(_req: HttpRequest, _params: RouteParams, ctx: HttpContext): HttpResponse {
   const peers = ctx.config.peers ?? {}
-  const result = Object.entries(peers).map(([alias, pubkey]) => ({
-    alias,
-    pubkey,
-    online: ctx.transport.isPeerConnected(pubkey)
-  }))
+  const result = Object.entries(peers).map(([alias, pubkey]) => {
+    const info = ctx.transport.getPeerConnectionInfo(pubkey)
+    return {
+      alias,
+      pubkey,
+      online: ctx.transport.isPeerConnected(pubkey),
+      capabilities: info?.capabilities ?? null,
+      status: info?.status ?? null,
+      statusMessage: info?.statusMessage ?? null
+    }
+  })
   return jsonResponse({ peers: result })
 }
 
@@ -177,11 +208,35 @@ export function handlePeerStatus(_req: HttpRequest, params: RouteParams, ctx: Ht
 
   if (!alias) return errorResponse(404, 'Unknown peer')
 
+  const info = ctx.transport.getPeerConnectionInfo(pubkey)
+
   return jsonResponse({
     alias,
     pubkey,
-    online: ctx.transport.isPeerConnected(pubkey)
+    online: ctx.transport.isPeerConnected(pubkey),
+    connectedSince: info?.connectedAt ?? null,
+    lastMessageAt: info?.lastMessageAt ?? null,
+    capabilities: info?.capabilities ?? null,
+    status: info?.status ?? null,
+    statusMessage: info?.statusMessage ?? null
   })
+}
+
+export function handleSetStatus(req: HttpRequest, _params: RouteParams, ctx: HttpContext): HttpResponse {
+  let payload: { status?: string; message?: string }
+  try {
+    payload = JSON.parse(req.body)
+  } catch {
+    return errorResponse(400, 'Invalid JSON body')
+  }
+
+  const validStatuses = ['available', 'busy', 'away']
+  if (!payload.status || !validStatuses.includes(payload.status)) {
+    return errorResponse(400, `Invalid status. Must be one of: ${validStatuses.join(', ')}`)
+  }
+
+  ctx.transport.setStatus(payload.status as 'available' | 'busy' | 'away', payload.message)
+  return jsonResponse({ status: payload.status, message: payload.message ?? null })
 }
 
 export function handleIdentity(_req: HttpRequest, _params: RouteParams, ctx: HttpContext): HttpResponse {
@@ -239,6 +294,58 @@ function summarizeEntry(e: InboxEntry): Record<string, unknown> {
     inReplyTo: e.inReplyTo,
     references: e.references
   }
+}
+
+// --- Introductions ---
+
+export function handleListIntroductions(_req: HttpRequest, _params: RouteParams, ctx: HttpContext): HttpResponse {
+  const introductions = ctx.getIntroductions()
+  return jsonResponse({ introductions })
+}
+
+export function handleAcceptIntroduction(_req: HttpRequest, params: RouteParams, ctx: HttpContext): HttpResponse {
+  const pubkey = params['pubkey']!
+  const intro = ctx.acceptIntroduction(pubkey)
+  if (!intro) return errorResponse(404, 'No pending introduction for this pubkey')
+  return jsonResponse({ accepted: true, ...intro })
+}
+
+export function handleRejectIntroduction(_req: HttpRequest, params: RouteParams, ctx: HttpContext): HttpResponse {
+  const pubkey = params['pubkey']!
+  const intro = ctx.rejectIntroduction(pubkey)
+  if (!intro) return errorResponse(404, 'No pending introduction for this pubkey')
+  return jsonResponse({ rejected: true, pubkey })
+}
+
+export function handleSendIntroduction(req: HttpRequest, params: RouteParams, ctx: HttpContext): HttpResponse {
+  const recipientPubkey = params['pubkey']!
+  let payload: { pubkey?: string; alias?: string; message?: string }
+  try {
+    payload = JSON.parse(req.body)
+  } catch {
+    return errorResponse(400, 'Invalid JSON body')
+  }
+
+  if (!payload.pubkey) return errorResponse(400, 'Missing required field: pubkey')
+  if (!/^[a-f0-9]{64}$/i.test(payload.pubkey)) return errorResponse(400, 'Invalid pubkey format')
+
+  if (!ctx.transport.isPeerConnected(recipientPubkey)) {
+    return errorResponse(422, 'Recipient peer not connected')
+  }
+
+  const introduced: Record<string, unknown> = { pubkey: payload.pubkey.toLowerCase() }
+  if (payload.alias) introduced.alias = payload.alias
+  if (payload.message) introduced.message = payload.message
+
+  const signature = ctx.signIntroduction(introduced)
+
+  ctx.transport.sendIntroduction(recipientPubkey, {
+    type: 'INTRODUCTION',
+    introduced: introduced as any,
+    signature
+  })
+
+  return jsonResponse({ sent: true, introduced, signature })
 }
 
 export function guessContentType(filePath: string): string {

@@ -28,7 +28,7 @@ import {
   checkIdentityPermissions,
   EMAIL_DOMAIN
 } from './identity.js'
-import { signMessage, verifyMessage } from './crypto.js'
+import { signMessage, verifyMessage, signIntroduction, verifyIntroduction } from './crypto.js'
 import { storeMessage, listMessages, getMessage, getMessageContent, deleteMessage, getInboxPath } from './inbox.js'
 import { Pop3Server } from './pop3/index.js'
 import { HttpServer } from './http/index.js'
@@ -37,6 +37,16 @@ import { FileTransferManager } from './transfer/index.js'
 import type { PeerFileOffer, PeerFileRequest, PeerFileComplete } from './transport/index.js'
 import type { PendingMessage } from './transfer/index.js'
 import { parseFileRefs, validateFileRefs, transformFileRefs, transformFileRefsFailed, ensureMediaDirs, getMediaDir } from './media.js'
+import {
+  loadIntroductions,
+  addIntroduction,
+  getPendingIntroductions,
+  getIntroduction,
+  acceptIntroduction as acceptIntro,
+  rejectIntroduction as rejectIntro,
+  type StoredIntroduction
+} from './introductions.js'
+import type { PeerIntroduction, PeerStatus } from './transport/index.js'
 import { guessContentType } from './http/handlers.js'
 
 let config = loadConfig()
@@ -69,6 +79,8 @@ Commands:
   queue clear                   Clear all queued messages
   transfers                     Show file transfers
   transfers --all               Show all transfers (including completed)
+  introductions                 List pending introductions
+  accept-introduction <pubkey>  Accept a pending introduction
   help                          Show this help message
 
 Environment Variables:
@@ -363,6 +375,58 @@ function resolveRecipient(to: string): { pubkey: string; display: string } | nul
   return null
 }
 
+async function showIntroductions(): Promise<void> {
+  const pending = getPendingIntroductions()
+
+  if (pending.length === 0) {
+    console.log('No pending introductions.')
+    return
+  }
+
+  console.log(`Pending introductions: ${pending.length}`)
+  console.log('')
+
+  for (const intro of pending) {
+    const display = intro.alias ?? intro.pubkey.slice(0, 16) + '...'
+    const introducer = intro.introducerAlias ?? intro.introducerPubkey.slice(0, 16) + '...'
+    const date = new Date(intro.receivedAt).toISOString()
+
+    console.log(`  ${display}`)
+    console.log(`    Pubkey: ${intro.pubkey}`)
+    console.log(`    Introduced by: ${introducer}`)
+    if (intro.message) console.log(`    Message: ${intro.message}`)
+    console.log(`    Received: ${date}`)
+    console.log('')
+  }
+
+  console.log('Accept with: quince accept-introduction <pubkey>')
+}
+
+async function handleAcceptIntroduction(pubkey: string): Promise<void> {
+  const intro = getIntroduction(pubkey.toLowerCase())
+  if (!intro) {
+    console.error(`No pending introduction for pubkey: ${pubkey}`)
+    process.exit(1)
+  }
+
+  const accepted = acceptIntro(pubkey.toLowerCase())
+  if (!accepted) {
+    console.error('Failed to accept introduction')
+    process.exit(1)
+  }
+
+  const alias = accepted.alias ?? accepted.pubkey.slice(0, 16)
+  config = addPeer(config, alias, accepted.pubkey)
+  if (!saveConfig(config)) {
+    console.error('Failed to save config')
+    process.exit(1)
+  }
+
+  console.log(`Accepted introduction: '${alias}'`)
+  console.log(`  Pubkey: ${accepted.pubkey}`)
+  console.log(`  Introduced by: ${accepted.introducerAlias ?? accepted.introducerPubkey.slice(0, 16) + '...'}`)
+}
+
 async function startDaemon(): Promise<void> {
   const permError = checkIdentityPermissions()
   if (permError) {
@@ -545,6 +609,61 @@ async function startDaemon(): Promise<void> {
     console.log(`  To allow messages from this sender, run: quince add-peer <alias> ${pubkey}`)
   })
 
+  transport.on('peer-status', (pubkey: string, status: PeerStatus) => {
+    const alias = getPeerAlias(config, pubkey)
+    const display = alias ?? pubkey.slice(0, 16) + '...'
+    console.log(`Peer ${display} status: ${status.status}${status.message ? ` (${status.message})` : ''}`)
+  })
+
+  // Introduction handling
+  transport.on('introduction', (intro: PeerIntroduction, senderPubkey: string) => {
+    const senderAlias = getPeerAlias(config, senderPubkey)
+    const display = senderAlias ?? senderPubkey.slice(0, 16) + '...'
+
+    console.log(`Received INTRODUCTION from ${display} for ${intro.introduced.pubkey.slice(0, 16)}...`)
+
+    // Verify signature
+    const valid = verifyIntroduction(intro.introduced as unknown as Record<string, unknown>, intro.signature, senderPubkey)
+    if (!valid) {
+      console.log('  Introduction signature verification FAILED, ignoring')
+      return
+    }
+
+    // Check if auto-accept is configured for this introducer
+    const trustConfig = config.trustIntroductions ?? {}
+    const shouldAutoAccept = senderAlias ? trustConfig[senderAlias] === true : false
+
+    if (shouldAutoAccept) {
+      const alias = intro.introduced.alias ?? intro.introduced.pubkey.slice(0, 16)
+      console.log(`  Auto-accepting introduction from trusted ${display}: adding '${alias}'`)
+
+      // Add to config
+      config = addPeer(config, alias, intro.introduced.pubkey)
+      saveConfig(config)
+
+      // Live-update whitelist
+      whitelist.add(intro.introduced.pubkey.toLowerCase())
+
+      // Connect to the new peer
+      transport.connectToPeer(intro.introduced.pubkey).catch(err => {
+        console.error(`  Failed to connect to introduced peer: ${err}`)
+      })
+    } else {
+      console.log(`  Queuing introduction as pending (${display} not in trustIntroductions)`)
+      addIntroduction({
+        pubkey: intro.introduced.pubkey.toLowerCase(),
+        alias: intro.introduced.alias,
+        capabilities: intro.introduced.capabilities,
+        message: intro.introduced.message,
+        introducerPubkey: senderPubkey,
+        introducerAlias: senderAlias,
+        signature: intro.signature,
+        receivedAt: Date.now(),
+        status: 'pending'
+      })
+    }
+  })
+
   // File transfer events
 
   // Sender: receiver is requesting files
@@ -613,7 +732,7 @@ async function startDaemon(): Promise<void> {
     subject: string,
     body: string,
     extraHeaders?: Record<string, string>
-  ): Promise<{ id: string; queued: boolean }> {
+  ): Promise<{ id: string; queued: boolean; messageId: string }> {
     const fromAddr = getEmailAddress(LOCAL_USER, identity.publicKey)
 
     const recipient = resolveRecipient(to)
@@ -621,8 +740,11 @@ async function startDaemon(): Promise<void> {
       throw new Error(`Invalid recipient address: ${to}`)
     }
 
+    const id = generateId()
+    const mimeMessageId = `<${id}@quincemail.com>`
+
     // Build MIME
-    let headerLines = `Subject: ${subject}`
+    let headerLines = `Subject: ${subject}\r\nMessage-ID: ${mimeMessageId}`
     if (extraHeaders) {
       for (const [name, value] of Object.entries(extraHeaders)) {
         headerLines += `\r\n${name}: ${value}`
@@ -630,7 +752,6 @@ async function startDaemon(): Promise<void> {
     }
     const fullMessage = `From: ${fromAddr}\r\nTo: ${to}\r\n${headerLines}\r\n\r\n${body}`
     const signed = signMessage(fullMessage, identity.secretKey)
-    const messageId = generateId()
     const encoded = encodeBase64(signed)
 
     console.log('')
@@ -638,11 +759,11 @@ async function startDaemon(): Promise<void> {
     console.log(`From: ${fromAddr}`)
     console.log(`To: ${to}`)
 
-    const success = await trySendMessage(messageId, recipient.pubkey, recipient.display, encoded)
+    const success = await trySendMessage(id, recipient.pubkey, recipient.display, encoded)
 
     if (!success) {
       queue.add({
-        id: messageId,
+        id,
         from: fromAddr,
         to,
         recipientPubkey: recipient.pubkey,
@@ -651,7 +772,7 @@ async function startDaemon(): Promise<void> {
       console.log(`Queued for retry`)
     }
 
-    return { id: messageId, queued: !success }
+    return { id, queued: !success, messageId: mimeMessageId }
   }
 
   // SMTP message handler
@@ -666,16 +787,30 @@ async function startDaemon(): Promise<void> {
       return
     }
 
-    const fullMessage = `From: ${from}\r\nTo: ${to}\r\n${data}`
+    const id = generateId()
+
+    // Inject Message-ID if the SMTP client didn't include one
+    let messageData = data
+    if (!/^Message-ID:/mi.test(data)) {
+      const mimeMessageId = `<${id}@quincemail.com>`
+      // Insert after the first line of headers (Subject typically)
+      const firstNewline = data.indexOf('\r\n')
+      if (firstNewline !== -1) {
+        messageData = data.slice(0, firstNewline) + `\r\nMessage-ID: ${mimeMessageId}` + data.slice(firstNewline)
+      } else {
+        messageData = `Message-ID: ${mimeMessageId}\r\n${data}`
+      }
+    }
+
+    const fullMessage = `From: ${from}\r\nTo: ${to}\r\n${messageData}`
     const signed = signMessage(fullMessage, identity.secretKey)
-    const messageId = generateId()
     const encoded = encodeBase64(signed)
 
-    const success = await trySendMessage(messageId, recipient.pubkey, recipient.display, encoded)
+    const success = await trySendMessage(id, recipient.pubkey, recipient.display, encoded)
 
     if (!success) {
       queue.add({
-        id: messageId,
+        id,
         from,
         to,
         recipientPubkey: recipient.pubkey,
@@ -734,7 +869,7 @@ async function startDaemon(): Promise<void> {
   // HTTP API server
   const httpContext: HttpContext = {
     identity,
-    config,
+    get config() { return config },
     username: LOCAL_USER,
     listMessages,
     getMessage,
@@ -769,7 +904,27 @@ async function startDaemon(): Promise<void> {
       } catch {
         return null
       }
-    }
+    },
+    getIntroductions: () => getPendingIntroductions(),
+    acceptIntroduction: (pubkey: string) => {
+      const intro = acceptIntro(pubkey)
+      if (!intro) return null
+
+      // Add peer to config + whitelist
+      const alias = intro.alias ?? intro.pubkey.slice(0, 16)
+      config = addPeer(config, alias, intro.pubkey)
+      saveConfig(config)
+      whitelist.add(intro.pubkey.toLowerCase())
+
+      // Connect to the new peer
+      transport.connectToPeer(intro.pubkey).catch(err => {
+        console.error(`Failed to connect to accepted peer: ${err}`)
+      })
+
+      return intro
+    },
+    rejectIntroduction: (pubkey: string) => rejectIntro(pubkey),
+    signIntroduction: (introduced: Record<string, unknown>) => signIntroduction(introduced, identity.secretKey)
   }
 
   const httpServer = new HttpServer({
@@ -920,6 +1075,18 @@ async function main(): Promise<void> {
 
     case 'transfers':
       await showTransfers(args[1] === '--all')
+      break
+
+    case 'introductions':
+      await showIntroductions()
+      break
+
+    case 'accept-introduction':
+      if (!args[1]) {
+        console.error('Usage: quince accept-introduction <pubkey>')
+        process.exit(1)
+      }
+      await handleAcceptIntroduction(args[1])
       break
 
     case 'help':

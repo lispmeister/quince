@@ -56,3 +56,26 @@ export function verifyMessage(mime: string, senderPubkey: string): { mime: strin
 
   return { mime, valid }
 }
+
+/**
+ * Sign an introduction payload. The introduced object is JSON-stringified,
+ * BLAKE2b-hashed, then Ed25519-signed — same pattern as message signing.
+ */
+export function signIntroduction(introduced: Record<string, unknown>, secretKey: string): string {
+  const data = JSON.stringify(introduced)
+  const hash = crypto.hash(b4a.from(data, 'utf8'))
+  const sig = crypto.sign(hash, b4a.from(secretKey, 'hex'))
+  return b4a.toString(sig, 'hex')
+}
+
+/**
+ * Verify an introduction signature against the introducer's public key.
+ */
+export function verifyIntroduction(introduced: Record<string, unknown>, signature: string, introducerPubkey: string): boolean {
+  if (!/^[a-f0-9]{128}$/i.test(signature)) return false
+  const data = JSON.stringify(introduced)
+  const hash = crypto.hash(b4a.from(data, 'utf8'))
+  const sig = b4a.from(signature, 'hex')
+  const pubkey = b4a.from(introducerPubkey, 'hex')
+  return crypto.verify(hash, sig, pubkey)
+}
