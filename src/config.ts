@@ -7,6 +7,7 @@ export interface Config {
   username?: string
   smtpPort?: number
   pop3Port?: number
+  httpPort?: number
   peers?: Record<string, string>  // alias -> pubkey
 }
 
@@ -69,6 +70,14 @@ export function validateConfig(config: unknown): ConfigValidationError[] {
     }
   }
 
+  if (c.httpPort !== undefined) {
+    if (typeof c.httpPort !== 'number') {
+      errors.push({ field: 'httpPort', message: 'HTTP port must be a number' })
+    } else if (!Number.isInteger(c.httpPort) || c.httpPort < 1 || c.httpPort > 65535) {
+      errors.push({ field: 'httpPort', message: 'HTTP port must be an integer between 1 and 65535' })
+    }
+  }
+
   if (c.peers !== undefined) {
     if (typeof c.peers !== 'object' || c.peers === null || Array.isArray(c.peers)) {
       errors.push({ field: 'peers', message: 'Peers must be an object' })
@@ -120,6 +129,10 @@ export function loadConfig(): Config {
         if (typeof parsed.pop3Port === 'number' && Number.isInteger(parsed.pop3Port) &&
             parsed.pop3Port >= 1 && parsed.pop3Port <= 65535) {
           config.pop3Port = parsed.pop3Port
+        }
+        if (typeof parsed.httpPort === 'number' && Number.isInteger(parsed.httpPort) &&
+            parsed.httpPort >= 1 && parsed.httpPort <= 65535) {
+          config.httpPort = parsed.httpPort
         }
         // Only keep individually-valid peers
         if (typeof parsed.peers === 'object' && parsed.peers !== null && !Array.isArray(parsed.peers)) {

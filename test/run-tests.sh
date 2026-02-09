@@ -15,6 +15,8 @@ ALICE_PORT=2525
 BOB_PORT=2526
 ALICE_POP3_PORT=1110
 BOB_POP3_PORT=1111
+ALICE_HTTP_PORT=2580
+BOB_HTTP_PORT=2581
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BARE="$PROJECT_DIR/node_modules/.bin/bare"
 QUINCE="$PROJECT_DIR/dist/index.js"
@@ -60,7 +62,7 @@ cleanup() {
   stop_daemon "ALICE" "$ALICE_HOME" 2>/dev/null
   stop_daemon "BOB" "$BOB_HOME" 2>/dev/null
   # Kill anything still holding our test ports
-  lsof -ti :$ALICE_PORT -ti :$BOB_PORT -ti :$ALICE_POP3_PORT -ti :$BOB_POP3_PORT 2>/dev/null | xargs kill 2>/dev/null || true
+  lsof -ti :$ALICE_PORT -ti :$BOB_PORT -ti :$ALICE_POP3_PORT -ti :$BOB_POP3_PORT -ti :$ALICE_HTTP_PORT -ti :$BOB_HTTP_PORT 2>/dev/null | xargs kill 2>/dev/null || true
   sleep 1
   rm -rf "$TEST_DIR"
 }
@@ -91,9 +93,10 @@ start_daemon() {
   local home=$2
   local port=$3
   local pop3_port=$4
+  local http_port=$5
 
-  log "Starting $name daemon on port $port (POP3: $pop3_port)..."
-  HOME="$home" SMTP_PORT="$port" POP3_PORT="$pop3_port" "$BARE" "$QUINCE" start > "$home/daemon.log" 2>&1 &
+  log "Starting $name daemon on port $port (POP3: $pop3_port, HTTP: $http_port)..."
+  HOME="$home" SMTP_PORT="$port" POP3_PORT="$pop3_port" HTTP_PORT="$http_port" "$BARE" "$QUINCE" start > "$home/daemon.log" 2>&1 &
   echo $! > "$home/daemon.pid"
 }
 
@@ -300,8 +303,8 @@ test_start_daemons() {
   TESTS_RUN=$((TESTS_RUN + 1))
   log "Test: Start ALICE and BOB daemons"
 
-  start_daemon "ALICE" "$ALICE_HOME" "$ALICE_PORT" "$ALICE_POP3_PORT"
-  start_daemon "BOB" "$BOB_HOME" "$BOB_PORT" "$BOB_POP3_PORT"
+  start_daemon "ALICE" "$ALICE_HOME" "$ALICE_PORT" "$ALICE_POP3_PORT" "$ALICE_HTTP_PORT"
+  start_daemon "BOB" "$BOB_HOME" "$BOB_PORT" "$BOB_POP3_PORT" "$BOB_HTTP_PORT"
 
   # Wait for both daemons to be ready
   local alice_ready=false
@@ -601,6 +604,223 @@ test_file_dedup() {
 }
 
 #
+# HTTP API tests (daemons must be running)
+#
+
+test_http_identity() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: HTTP GET /api/identity returns ALICE pubkey"
+
+  local response
+  response=$(curl -s "http://127.0.0.1:$ALICE_HTTP_PORT/api/identity" 2>/dev/null)
+
+  if echo "$response" | grep -q "$ALICE_PUBKEY"; then
+    pass "HTTP /api/identity returns correct pubkey"
+  else
+    fail "HTTP /api/identity did not return ALICE pubkey"
+    echo "Response: $response"
+  fi
+}
+
+test_http_peers() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: HTTP GET /api/peers returns peer list"
+
+  local response
+  response=$(curl -s "http://127.0.0.1:$ALICE_HTTP_PORT/api/peers" 2>/dev/null)
+
+  if echo "$response" | grep -q '"bob"' && echo "$response" | grep -q "$BOB_PUBKEY"; then
+    pass "HTTP /api/peers returns peer list with bob"
+  else
+    fail "HTTP /api/peers did not return expected peer list"
+    echo "Response: $response"
+  fi
+}
+
+test_http_inbox_list() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: HTTP GET /api/inbox lists messages on BOB"
+
+  local response
+  response=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/inbox" 2>/dev/null)
+
+  if echo "$response" | grep -q '"messages"' && echo "$response" | grep -q '"total"'; then
+    # BOB should have messages from earlier tests
+    local total
+    total=$(echo "$response" | grep -o '"total":[0-9]*' | grep -o '[0-9]*')
+    if [ -n "$total" ] && [ "$total" -gt 0 ]; then
+      pass "HTTP /api/inbox lists $total message(s)"
+    else
+      fail "HTTP /api/inbox returned 0 messages (expected >0)"
+      echo "Response: $response"
+    fi
+  else
+    fail "HTTP /api/inbox did not return expected format"
+    echo "Response: $response"
+  fi
+}
+
+test_http_inbox_get_and_raw() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: HTTP GET /api/inbox/:id and /api/inbox/:id/raw"
+
+  # Get the first message ID from inbox list
+  local list_response
+  list_response=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/inbox" 2>/dev/null)
+  local msg_id
+  msg_id=$(echo "$list_response" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"//;s/"//')
+
+  if [ -z "$msg_id" ]; then
+    fail "HTTP inbox get: could not find a message ID"
+    return 1
+  fi
+
+  # Get single message
+  local get_response
+  get_response=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/inbox/$msg_id" 2>/dev/null)
+
+  if echo "$get_response" | grep -q "$msg_id"; then
+    pass "HTTP /api/inbox/:id returns message $msg_id"
+  else
+    fail "HTTP /api/inbox/:id did not return the message"
+    echo "Response: $get_response"
+    return 1
+  fi
+
+  # Get raw .eml
+  TESTS_RUN=$((TESTS_RUN + 1))
+  local raw_response
+  raw_response=$(curl -sD - "http://127.0.0.1:$BOB_HTTP_PORT/api/inbox/$msg_id/raw" 2>/dev/null)
+
+  if echo "$raw_response" | grep -q "message/rfc822"; then
+    pass "HTTP /api/inbox/:id/raw returns correct Content-Type"
+  else
+    fail "HTTP /api/inbox/:id/raw did not return message/rfc822"
+    echo "Response: $raw_response"
+  fi
+}
+
+test_http_inbox_filter() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: HTTP GET /api/inbox?from=<pubkey> filters messages"
+
+  local response
+  response=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/inbox?from=$ALICE_PUBKEY" 2>/dev/null)
+
+  if echo "$response" | grep -q '"messages"'; then
+    local total
+    total=$(echo "$response" | grep -o '"total":[0-9]*' | grep -o '[0-9]*')
+    if [ -n "$total" ] && [ "$total" -gt 0 ]; then
+      pass "HTTP /api/inbox?from= filters to $total message(s) from ALICE"
+    else
+      fail "HTTP /api/inbox?from= returned 0 messages (expected >0)"
+      echo "Response: $response"
+    fi
+  else
+    fail "HTTP /api/inbox?from= did not return expected format"
+    echo "Response: $response"
+  fi
+}
+
+test_http_send() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: HTTP POST /api/send sends a message from ALICE to BOB"
+
+  local to_addr="bob@${BOB_PUBKEY}.quincemail.com"
+  local payload
+  payload=$(cat <<EOF
+{"to":"$to_addr","subject":"HTTP API Test","body":"Sent via HTTP API!"}
+EOF
+)
+
+  local response
+  response=$(curl -s -X POST "http://127.0.0.1:$ALICE_HTTP_PORT/api/send" \
+    -H "Content-Type: application/json" \
+    -d "$payload" 2>/dev/null)
+
+  if echo "$response" | grep -q '"id"'; then
+    pass "HTTP POST /api/send accepted message"
+  else
+    fail "HTTP POST /api/send did not return a message ID"
+    echo "Response: $response"
+    return 1
+  fi
+
+  # Wait for delivery
+  sleep 5
+
+  # Verify BOB received it via HTTP inbox
+  TESTS_RUN=$((TESTS_RUN + 1))
+  local inbox_response
+  inbox_response=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/inbox?subject=HTTP%20API%20Test" 2>/dev/null)
+
+  if echo "$inbox_response" | grep -q "HTTP API Test"; then
+    pass "HTTP-sent message delivered to BOB's inbox"
+  else
+    fail "HTTP-sent message not found in BOB's inbox"
+    echo "Response: $inbox_response"
+    echo "--- ALICE log (last 20 lines) ---"
+    tail -20 "$ALICE_HOME/daemon.log"
+    echo "--- BOB log (last 20 lines) ---"
+    tail -20 "$BOB_HOME/daemon.log"
+  fi
+}
+
+test_http_delete() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: HTTP DELETE /api/inbox/:id deletes a message from BOB"
+
+  # Get first message ID
+  local list_response
+  list_response=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/inbox" 2>/dev/null)
+  local msg_id
+  msg_id=$(echo "$list_response" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"//;s/"//')
+  local total_before
+  total_before=$(echo "$list_response" | grep -o '"total":[0-9]*' | grep -o '[0-9]*')
+
+  if [ -z "$msg_id" ]; then
+    fail "HTTP delete: no messages to delete"
+    return 1
+  fi
+
+  # Delete the message
+  local del_response
+  del_response=$(curl -s -X DELETE "http://127.0.0.1:$BOB_HTTP_PORT/api/inbox/$msg_id" 2>/dev/null)
+
+  if echo "$del_response" | grep -q '"deleted":true'; then
+    # Verify count decreased
+    local after_response
+    after_response=$(curl -s "http://127.0.0.1:$BOB_HTTP_PORT/api/inbox" 2>/dev/null)
+    local total_after
+    total_after=$(echo "$after_response" | grep -o '"total":[0-9]*' | grep -o '[0-9]*')
+
+    if [ "$total_after" -lt "$total_before" ]; then
+      pass "HTTP DELETE removed message (${total_before} -> ${total_after})"
+    else
+      fail "HTTP DELETE response was OK but count didn't decrease"
+    fi
+  else
+    fail "HTTP DELETE did not confirm deletion"
+    echo "Response: $del_response"
+  fi
+}
+
+test_http_transfers() {
+  TESTS_RUN=$((TESTS_RUN + 1))
+  log "Test: HTTP GET /api/transfers returns transfer list"
+
+  local response
+  response=$(curl -s "http://127.0.0.1:$ALICE_HTTP_PORT/api/transfers" 2>/dev/null)
+
+  if echo "$response" | grep -q '"transfers"'; then
+    pass "HTTP /api/transfers returns valid response"
+  else
+    fail "HTTP /api/transfers did not return expected format"
+    echo "Response: $response"
+  fi
+}
+
+#
 # Test summary
 #
 
@@ -659,6 +879,16 @@ main() {
   test_file_transfer
   test_second_file_transfer
   test_file_dedup
+
+  # HTTP API tests
+  test_http_identity
+  test_http_peers
+  test_http_inbox_list
+  test_http_inbox_get_and_raw
+  test_http_inbox_filter
+  test_http_send
+  test_http_delete
+  test_http_transfers
 
   # Cleanup
   stop_all_daemons

@@ -29,18 +29,22 @@ import {
   EMAIL_DOMAIN
 } from './identity.js'
 import { signMessage, verifyMessage } from './crypto.js'
-import { storeMessage, listMessages, getMessageContent, deleteMessage, getInboxPath } from './inbox.js'
+import { storeMessage, listMessages, getMessage, getMessageContent, deleteMessage, getInboxPath } from './inbox.js'
 import { Pop3Server } from './pop3/index.js'
+import { HttpServer } from './http/index.js'
+import type { HttpContext } from './http/index.js'
 import { FileTransferManager } from './transfer/index.js'
 import type { PeerFileOffer, PeerFileRequest, PeerFileComplete } from './transport/index.js'
 import type { PendingMessage } from './transfer/index.js'
-import { parseFileRefs, validateFileRefs, transformFileRefs, transformFileRefsFailed, ensureMediaDirs } from './media.js'
+import { parseFileRefs, validateFileRefs, transformFileRefs, transformFileRefsFailed, ensureMediaDirs, getMediaDir } from './media.js'
+import { guessContentType } from './http/handlers.js'
 
 let config = loadConfig()
 const identity = loadIdentity()
 
 const PORT = parseInt(env.SMTP_PORT ?? String(config.smtpPort ?? 2525), 10)
 const POP3_PORT = parseInt(env.POP3_PORT ?? String(config.pop3Port ?? 1110), 10)
+const HTTP_PORT = parseInt(env.HTTP_PORT ?? String(config.httpPort ?? 2580), 10)
 const BIND_ADDR = env.BIND_ADDR ?? '127.0.0.1'
 const HOSTNAME = env.HOSTNAME ?? 'quince.local'
 const LOCAL_USER = env.LOCAL_USER ?? config.username ?? 'user'
@@ -70,6 +74,7 @@ Commands:
 Environment Variables:
   SMTP_PORT    SMTP server port (default: 2525)
   POP3_PORT    POP3 server port (default: 1110)
+  HTTP_PORT    HTTP API port (default: 2580)
   BIND_ADDR    Bind address (default: 127.0.0.1)
   HOSTNAME     Server hostname (default: quince.local)
   LOCAL_USER   Local username (default: user)
@@ -180,6 +185,7 @@ async function showConfig(): Promise<void> {
   console.log(`  LOCAL_USER: ${LOCAL_USER}`)
   console.log(`  SMTP_PORT: ${PORT}`)
   console.log(`  POP3_PORT: ${POP3_PORT}`)
+  console.log(`  HTTP_PORT: ${HTTP_PORT}`)
   console.log(`  BIND_ADDR: ${BIND_ADDR}`)
   console.log(`  HOSTNAME: ${HOSTNAME}`)
   console.log(`  Public key: ${identity.publicKey.slice(0, 16)}...`)
@@ -376,6 +382,7 @@ async function startDaemon(): Promise<void> {
   console.log(`  Email: ${emailAddr}`)
   console.log(`  SMTP: ${BIND_ADDR}:${PORT}`)
   console.log(`  POP3: ${BIND_ADDR}:${POP3_PORT}`)
+  console.log(`  HTTP: ${BIND_ADDR}:${HTTP_PORT}`)
   console.log(`  Peers: ${peerCount} (whitelist mode)`)
 
   const transport = new Transport(identity, { whitelist })
@@ -600,6 +607,53 @@ async function startDaemon(): Promise<void> {
     storeMessage(pending.messageId, storedMime, pending.senderPubkey, pending.signatureValid)
   })
 
+  // Shared send logic for SMTP and HTTP API
+  async function sendOutgoing(
+    to: string,
+    subject: string,
+    body: string,
+    extraHeaders?: Record<string, string>
+  ): Promise<{ id: string; queued: boolean }> {
+    const fromAddr = getEmailAddress(LOCAL_USER, identity.publicKey)
+
+    const recipient = resolveRecipient(to)
+    if (!recipient) {
+      throw new Error(`Invalid recipient address: ${to}`)
+    }
+
+    // Build MIME
+    let headerLines = `Subject: ${subject}`
+    if (extraHeaders) {
+      for (const [name, value] of Object.entries(extraHeaders)) {
+        headerLines += `\r\n${name}: ${value}`
+      }
+    }
+    const fullMessage = `From: ${fromAddr}\r\nTo: ${to}\r\n${headerLines}\r\n\r\n${body}`
+    const signed = signMessage(fullMessage, identity.secretKey)
+    const messageId = generateId()
+    const encoded = encodeBase64(signed)
+
+    console.log('')
+    console.log(`--- Outgoing message ---`)
+    console.log(`From: ${fromAddr}`)
+    console.log(`To: ${to}`)
+
+    const success = await trySendMessage(messageId, recipient.pubkey, recipient.display, encoded)
+
+    if (!success) {
+      queue.add({
+        id: messageId,
+        from: fromAddr,
+        to,
+        recipientPubkey: recipient.pubkey,
+        mime: encoded
+      })
+      console.log(`Queued for retry`)
+    }
+
+    return { id: messageId, queued: !success }
+  }
+
   // SMTP message handler
   async function onMessage(from: string, to: string, data: string): Promise<void> {
     console.log('')
@@ -677,6 +731,63 @@ async function startDaemon(): Promise<void> {
     process.exit(1)
   }
 
+  // HTTP API server
+  const httpContext: HttpContext = {
+    identity,
+    config,
+    username: LOCAL_USER,
+    listMessages,
+    getMessage,
+    getMessageContent,
+    deleteMessage,
+    sendMessage: sendOutgoing,
+    transport,
+    transferManager,
+    getTransfers: () => {
+      const stateFile = path.join(os.homedir(), '.quince', 'transfers.json')
+      try {
+        if (fs.existsSync(stateFile)) {
+          const raw = fs.readFileSync(stateFile, 'utf8') as string
+          const state = JSON.parse(raw)
+          return Object.values(state.transfers ?? {})
+        }
+      } catch {}
+      return []
+    },
+    readMediaFile: (relativePath: string) => {
+      const mediaDir = getMediaDir()
+      const fullPath = path.join(mediaDir, relativePath)
+      const resolved = path.resolve(fullPath)
+      const resolvedMedia = path.resolve(mediaDir)
+      if (!resolved.startsWith(resolvedMedia + '/') && resolved !== resolvedMedia) {
+        return null
+      }
+      try {
+        if (!fs.existsSync(fullPath)) return null
+        const content = fs.readFileSync(fullPath) as Buffer
+        return { content, contentType: guessContentType(relativePath) }
+      } catch {
+        return null
+      }
+    }
+  }
+
+  const httpServer = new HttpServer({
+    port: HTTP_PORT,
+    host: BIND_ADDR,
+    context: httpContext
+  })
+
+  try {
+    await httpServer.start()
+  } catch (err) {
+    console.error('Failed to start HTTP server:', err)
+    await pop3Server.stop()
+    await smtpServer.stop()
+    await transport.destroy()
+    process.exit(1)
+  }
+
   // Graceful shutdown
   const shutdown = async () => {
     if (isShuttingDown) return
@@ -702,6 +813,14 @@ async function startDaemon(): Promise<void> {
       console.log('  POP3 server stopped')
     } catch (err) {
       console.error('  Error stopping POP3 server:', err)
+    }
+
+    // Close HTTP server
+    try {
+      await httpServer.stop()
+      console.log('  HTTP server stopped')
+    } catch (err) {
+      console.error('  Error stopping HTTP server:', err)
     }
 
     // Close file transfer manager

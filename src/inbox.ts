@@ -11,6 +11,11 @@ export interface InboxEntry {
   senderPubkey: string
   signatureValid: boolean
   receivedAt: number
+  contentType?: string
+  messageType?: string
+  messageId?: string
+  inReplyTo?: string
+  references?: string
 }
 
 const INBOX_DIR_NAME = 'inbox'
@@ -87,6 +92,18 @@ export function storeMessage(
     receivedAt
   }
 
+  // Extract optional headers (only set if present)
+  const contentType = extractHeader(mime, 'Content-Type')
+  if (contentType) entry.contentType = contentType
+  const messageType = extractHeader(mime, 'X-Quince-Message-Type')
+  if (messageType) entry.messageType = messageType
+  const messageId = extractHeader(mime, 'Message-ID')
+  if (messageId) entry.messageId = messageId
+  const inReplyTo = extractHeader(mime, 'In-Reply-To')
+  if (inReplyTo) entry.inReplyTo = inReplyTo
+  const references = extractHeader(mime, 'References')
+  if (references) entry.references = references
+
   // Append to index
   const index = loadIndex()
   index.push(entry)
@@ -97,6 +114,11 @@ export function storeMessage(
 
 export function listMessages(): InboxEntry[] {
   return loadIndex()
+}
+
+export function getMessage(id: string): InboxEntry | null {
+  const index = loadIndex()
+  return index.find(e => e.id === id) ?? null
 }
 
 export function getMessageContent(entry: InboxEntry): string | null {
