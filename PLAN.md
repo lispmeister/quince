@@ -436,21 +436,78 @@ Reduce onboarding friction — agents can discover peers and establish trust pro
 
 ### M13: Multi-Agent Coordination
 **Spec: [AGENT-FIRST-PROPOSAL.md](./AGENT-FIRST-PROPOSAL.md)**
-
 Enable one-to-many messaging and richer delivery semantics.
-
 **Multi-recipient delivery:**
 - Support multiple `RCPT TO` in SMTP session
 - Independent delivery to each recipient over Hyperswarm
 - Partial failure handling (some offline, some not whitelisted)
 - HTTP API: `POST /api/send` with `to: [<pubkey1>, <pubkey2>]`
-
-**Processing receipts (convention):**
 - `X-Quince-Processing-Status: completed | failed | in-progress`
 - `X-Quince-Processing-Duration: <ms>`
 - Indexed and queryable via inbox API
 - Agent convention, not enforced by quince
+### M14: Legacy Email Gateway
+**Spec: [LEGACY-EMAIL-GATEWAY.md](./LEGACY-EMAIL-GATEWAY.md)**
 
+Bridge the public internet email network to Quince. Unknown senders pay per-message to reach a Quince user; whitelisted senders bypass payment.
+
+**Centralized MX gateway at quincemail.com:**
+- Accepts inbound SMTP from the public internet
+- Users get `alice@quincemail.com` (separate from P2P pubkey address)
+- Username registration tied to Ed25519 pubkey (proof-of-ownership)
+
+**Payment gate (per-message, fixed platform price):**
+- Non-whitelisted sender → gateway holds message, replies with payment link
+- Payment rails: Lightning Network + Stripe (MVP)
+- Lightning invoice included in reply email (agents can parse and pay programmatically)
+- 24-hour hold timeout, then message discarded
+- Paid messages forwarded to recipient daemon over Hyperswarm into separate gate inbox
+
+**Whitelist (bypass payment):**
+- By sender address (`noreply@github.com`)
+- By domain (`*.bank.com`)
+- By List-ID header (`dev-updates.github.com`)
+- Managed via `/api/gate/whitelist` endpoints
+
+**Gate inbox & triage:**
+- Separate inbox for paid messages (`/api/gate`)
+- Agent-driven filter rules: auto-accept/reject based on domain, subject, body, headers
+- Two-layer triage: structured JSON rules (deterministic) + agent judgment (natural language)
+- Accepting a paid message promotes sender to free whitelist
+- Delivery receipt emailed to sender on acceptance
+
+**Inbound only for MVP** — no outbound SMTP relay.
+
+### M15: OpenClaw Integration
+**Spec: [OPENCLAW-INTEGRATION.md](./OPENCLAW-INTEGRATION.md)**
+
+First-class integration with [OpenClaw](https://docs.openclaw.ai) agent platform.
+
+**Quince skill (single skill, published on ClawHub):**
+- `clawhub install quince` — one-command install
+- SKILL.md teaches agent to use quince HTTP API via curl
+- Subcommands: /quince send, /quince inbox, /quince gate, /quince peers
+
+**Zero-config onboarding:**
+- Install generates Ed25519 keypair automatically
+- Registers username on quincemail.com directory
+- Agent auto-starts daemon on first use (OpenClaw background exec)
+- Self-healing: agent checks health endpoint, restarts daemon if down
+
+**Agent triage (two layers):**
+- Layer 1: Structured JSON rules in quince config (deterministic filters)
+- Layer 2: Agent judgment from AGENTS.md natural language preferences
+- Agent periodically checks gate inbox and triages pending messages
+
+**Peer discovery via quincemail.com registry:**
+- Directory API: lookup users by username, get pubkey
+- Auto-resolve unknown usernames when sending
+- Introduction-based trust: directory provides pubkey, agent sends INTRODUCTION
+- Preserves mutual whitelist security model
+
+**Cross-channel routing:**
+- Agent forwards quince messages to Telegram/Slack/Discord via OpenClaw channels
+- User replies in chat, agent relays back via quince P2P
 ### Future Enhancements
 - TLS support (only needed if binding to non-localhost)
 - MUA auto-configuration / autoconfig XML
@@ -461,4 +518,6 @@ Enable one-to-many messaging and richer delivery semantics.
 - Per-peer rate limiting and backpressure
 - Sent folder synchronization
 - Contact/alias synchronization across devices
-- Global agent registry (optional, separate service — not core protocol)
+- Outbound SMTP relay (reply to legacy email senders)
+- End-to-end encryption for gateway messages (sender encrypts to recipient pubkey)
+- USDT payment rail for legacy gateway
