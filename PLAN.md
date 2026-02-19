@@ -625,24 +625,39 @@ First-class integration with [OpenClaw](https://docs.openclaw.ai) agent platform
 
 ### M17: Quince Relay
 **Spec: [RELAY-SPEC.md](./RELAY-SPEC.md)** (to be written)
-
 The centralized bridge between the public internet email network and the Quince P2P network. Runs at `quincemail.com`.
 
+**Architecture decision: split inbound and outbound**
+
+Inbound and outbound email have fundamentally different operational profiles:
+
+- **Inbound SMTP** (receiving from Gmail et al.) — self-hosted MX. Inbound delivery does not require IP reputation; any server that accepts port 25 connections works. This is unavoidable and straightforward.
+- **Outbound replies** (payment request notifications) — transactional email provider (**Resend** or **Postmark**). Self-hosting outbound SMTP on a fresh IP is impractical: new VPS IPs have zero reputation, cloud providers often block port 25, and Gmail/Outlook will defer or drop mail from unknown IPs for weeks. Resend/Postmark handle IP warming, DKIM, bounce handling, and deliverability out of the box.
+- **Agent-to-agent fallback** — include the payment URL in the `550` SMTP rejection response. Sender MTAs surface this to the caller; agents can parse it without needing any outbound email at all.
+ 
 **DNS & Infrastructure:**
 - `MX quincemail.com` → `mx.quincemail.com` (priority 10) — inbound SMTP
 - `A mx.quincemail.com` → relay server IP
-- `PTR <relay-IP>` → `mx.quincemail.com` — reverse DNS for outbound mail reputation
-- `SPF quincemail.com` → `v=spf1 mx ~all` — authorize relay to send payment reply emails
+- `PTR <relay-IP>` → `mx.quincemail.com` — reverse DNS (required by many receivers)
+- `SPF quincemail.com` → `v=spf1 include:<transactional-provider> ~all` — authorise Resend/Postmark to send on behalf of quincemail.com
+- `DKIM` — configured via transactional provider (DNS TXT record, required for inbox placement)
+- `DMARC quincemail.com` → `v=DMARC1; p=quarantine; rua=mailto:dmarc@quincemail.com` — signals legitimate sender, catches spoofing
 - Wildcard `*.quincemail.com → 127.0.0.1` already exists for MUA compatibility (does not conflict with MX)
-
+**Deliverability notes:**
+- Payment reply emails go *to the sender* who just emailed us — Gmail/Outlook treat replies to recent senders favourably
+- Keep reply emails plain text, no HTML, no images — transactional plain text lands better than marketing HTML
+- Subject: `Re: Your message to alice@quincemail.com` — contextual, not spammy
+- Domain reputation takes months to establish; some replies will land in spam initially — this is expected and unavoidable for any new domain
+- BIMI (brand logo in inbox) — nice to have post-MVP
+ 
 **Relay server (`relay/src/`):**
-- Inbound SMTP listener (accepts mail from the public internet)
+- Inbound SMTP listener (accepts mail from the public internet on port 25)
 - Username registry: maps `alice@quincemail.com` → Alice's Ed25519 pubkey
 - Whitelist enforcement: whitelisted senders bypass payment, delivered to main MTA inbox
-- Payment gate: unknown senders receive a payment link reply; message held 24 hours
-- Payment rails: Lightning Network (invoice in reply email, agent-parseable) + Stripe
+- Payment gate: unknown senders receive `550` rejection with payment URL (agent-parseable) + transactional email reply (human-readable)
+- Payment rails: Lightning Network + Stripe (MVP); USDT post-MVP
+- Transactional email via Resend or Postmark API — no self-hosted outbound SMTP
 - Hyperswarm forwarder: delivers accepted messages to recipient MTA over P2P
-- Outbound SMTP (payment reply emails only — not a general relay)
 - REST API for web UI and MTA integration
 
 **Web UI (`relay/ui/`):**
@@ -657,21 +672,23 @@ The centralized bridge between the public internet email network and the Quince 
 ```
 relay/
 ├── src/
-│   ├── smtp.ts       ← Inbound SMTP listener
-│   ├── registry.ts   ← Username ↔ pubkey storage
-│   ├── payment.ts    ← Lightning + Stripe payment hold
-│   ├── forwarder.ts  ← Hyperswarm delivery to recipient MTA
-│   ├── api.ts        ← REST API (UI + MTA integration)
-│   └── index.ts      ← Entry point, web UI server
-├── ui/               ← Web management interface
+│   ├── smtp.ts        ← Inbound SMTP listener (port 25)
+│   ├── registry.ts    ← Username ↔ pubkey storage
+│   ├── payment.ts     ← Lightning + Stripe payment hold
+│   ├── notify.ts      ← Transactional email via Resend/Postmark
+│   ├── forwarder.ts   ← Hyperswarm delivery to recipient MTA
+│   ├── api.ts         ← REST API (UI + MTA integration)
+│   └── index.ts       ← Entry point, web UI server
+├── ui/                ← Web management interface
 └── package.json
 ```
-
+ 
 **Acceptance Criteria:**
 - `alice@quincemail.com` receives inbound SMTP from Gmail, Outlook, etc.
-- Unknown senders receive a Lightning payment link reply within 5 seconds
+- Unknown senders receive a `550` rejection containing the payment URL within 5 seconds
+- Unknown senders also receive a plain-text payment request reply via Resend/Postmark
 - Paid messages forwarded to Alice's MTA and appear in gate inbox
 - Whitelisted senders bypass payment and appear in main inbox
 - Web UI at `:2590` allows full relay management without CLI
 - All relay actions logged and auditable via web UI
-- USDT payment rail for legacy gateway
+- DKIM, SPF, and DMARC all pass for outbound reply emails
