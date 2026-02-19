@@ -484,13 +484,14 @@ async function startDaemon(): Promise<void> {
   // Build whitelist from configured peers
   const whitelist = new Set(Object.values(peers).map(pk => pk.toLowerCase()))
 
-  console.log('Starting quince daemon...')
-  console.log(`  User: ${LOCAL_USER}`)
-  console.log(`  Email: ${emailAddr}`)
-  console.log(`  SMTP: ${BIND_ADDR}:${PORT}`)
-  console.log(`  POP3: ${BIND_ADDR}:${POP3_PORT}`)
-  console.log(`  HTTP: ${BIND_ADDR}:${HTTP_PORT}`)
-  console.log(`  Peers: ${peerCount} (whitelist mode)`)
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
+  console.log(`\n  ┌──┐`)
+  console.log(`  │🍐│  q u i n c e  v${pkg.version}`)
+  console.log(`  └──┘  ───────────────────────────────────────────`)
+  console.log(`        ${emailAddr}`)
+  console.log(`        HTTP :${HTTP_PORT}  SMTP :${PORT}  POP3 :${POP3_PORT}`)
+  console.log(`        ${peerCount} peer${peerCount !== 1 ? 's' : ''} (whitelist mode)`)
+  console.log()
 
   const transport = new Transport(identity, { whitelist })
   const queue = new MessageQueue()

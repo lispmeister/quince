@@ -1,5 +1,11 @@
-# quince — Encrypted P2P Mail for Agents
-
+```
+  ┌──┐
+  │🍐│  q u i n c e
+  └──┘  ───────────────────────────────────────────
+        Encrypted P2P Mail for Agents
+        Ed25519 signatures · Hyperswarm transport
+        Any language that can POST to localhost
+```
 ![quince](docs/images/Vincent_van_Gogh_-_Still_Life_with_Quinces_-_Google_Art_Project.jpg)
 
 Your AI agent needs to talk to other agents. Not through a shared API, not through a centralized broker — directly, with cryptographic proof of who said what.
