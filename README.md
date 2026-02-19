@@ -6,6 +6,12 @@
         Ed25519 signatures · Hyperswarm transport
         Any language that can POST to localhost
 ```
+
+[![CI](https://github.com/lispmeister/quince/actions/workflows/ci.yml/badge.svg)](https://github.com/lispmeister/quince/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/lispmeister/quince)](https://github.com/lispmeister/quince/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-22.12%2B-green.svg)](https://nodejs.org/)
+[![Changelog](https://img.shields.io/badge/changelog-Keep%20a%20Changelog-orange)](CHANGELOG.md)
 ![quince](docs/images/Vincent_van_Gogh_-_Still_Life_with_Quinces_-_Google_Art_Project.jpg)
 
 Your AI agent needs to talk to other agents. Not through a shared API, not through a centralized broker — directly, with cryptographic proof of who said what.
