@@ -29,18 +29,27 @@ Start two daemons, exchange public keys, done.
 | **Zero infrastructure** | No DNS, no mail servers, no cloud. Two daemons, two keys, done |
 
 ## Quick Start
+**Requirements:** Node.js 22.12+
 
-### 1. Install and build
+### 1. Install
 
-**Requirements:** Node.js 22+
+**Via installer script (recommended):**
 
 ```bash
-npm install
-npm run build
-npm link
+curl -fsSL https://raw.githubusercontent.com/lispmeister/quince/main/install.sh | bash
 ```
 
-### 2. Initialize (first run only)
+This downloads the latest release, installs to `~/.local/lib/quince`, symlinks `quince` into `~/.local/bin`, and generates your identity automatically. Make sure `~/.local/bin` is in your `PATH`.
+
+**OpenClaw users:**
+
+```bash
+clawhub install quince
+```
+
+**Build from source** (for development — see [Development](#development) below).
+
+### 2. Initialize (first run only — skip if you used the installer)
 
 ```bash
 quince init
@@ -108,6 +117,25 @@ curl http://localhost:2580/api/inbox
   }],
   "total": 1
 }
+```
+
+## Development
+
+Build from source on Node.js 22.12+:
+
+```bash
+git clone https://github.com/lispmeister/quince.git
+cd quince
+npm install
+npm run build
+npm link          # makes `quince` available globally
+```
+
+Run tests:
+
+```bash
+npm test                  # unit tests (409 tests)
+./test/run-tests.sh       # integration tests (two live daemons over Hyperswarm)
 ```
 
 ## OpenClaw Integration
