@@ -1,4 +1,4 @@
-import tcp from 'bare-tcp'
+import net from 'net'
 import { parseRequestHead, formatResponse, errorResponse } from './parser.js'
 import { Router } from './router.js'
 import type { HttpContext } from './handlers.js'
@@ -39,7 +39,7 @@ export interface HttpServerConfig {
 }
 
 export class HttpServer {
-  private server: ReturnType<typeof tcp.createServer> | null = null
+  private server: ReturnType<typeof net.createServer> | null = null
   private config: HttpServerConfig
   private router: Router
 
@@ -88,7 +88,7 @@ export class HttpServer {
 
   start(): Promise<number> {
     return new Promise((resolve, reject) => {
-      this.server = tcp.createServer()
+      this.server = net.createServer()
 
       this.server.on('connection', (socket: any) => {
         this.handleConnection(socket)

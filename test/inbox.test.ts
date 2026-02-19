@@ -1,10 +1,10 @@
-import { test, expect, describe, beforeEach, afterEach } from 'bun:test'
+import { test, describe, beforeEach, afterEach } from 'node:test'
+import assert from 'node:assert'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import crypto from 'hypercore-crypto'
-import b4a from 'b4a'
-import { signMessage, verifyMessage } from '../src/crypto.js'
+import { signMessage, verifyMessage } from '../dist/crypto.js'
 
 // Inbox module uses bare-fs/bare-path/bare-os which resolve to node equivalents in bun,
 // but it reads getConfigDir() from config.ts which uses os.homedir(). We test the logic
@@ -80,8 +80,8 @@ function listMessages(inboxDir: string): InboxEntry[] {
 function makeKeyPair() {
   const kp = crypto.keyPair()
   return {
-    publicKey: b4a.toString(kp.publicKey, 'hex'),
-    secretKey: b4a.toString(kp.secretKey, 'hex')
+    publicKey: kp.publicKey.toString('hex'),
+    secretKey: kp.secretKey.toString('hex')
   }
 }
 
@@ -106,30 +106,30 @@ describe('inbox storage', () => {
     storeMessage(testDir, 'msg-001', MIME, 'abcd'.repeat(16), true)
 
     const files = fs.readdirSync(testDir).filter((f: string) => f.endsWith('.eml'))
-    expect(files).toHaveLength(1)
-    expect(files[0]).toContain('msg-001.eml')
+    assert.strictEqual(files.length, 1)
+    assert.ok(files[0]!.includes('msg-001.eml'))
 
     const content = fs.readFileSync(path.join(testDir, files[0]!), 'utf8')
-    expect(content).toBe(MIME)
+    assert.strictEqual(content, MIME)
   })
 
   test('extracts metadata into index', () => {
     storeMessage(testDir, 'msg-002', MIME, 'abcd'.repeat(16), true)
 
     const messages = listMessages(testDir)
-    expect(messages).toHaveLength(1)
-    expect(messages[0]!.id).toBe('msg-002')
-    expect(messages[0]!.from).toBe('alice@alice.quincemail.com')
-    expect(messages[0]!.to).toBe('bob@bob.quincemail.com')
-    expect(messages[0]!.subject).toBe('Test Message')
-    expect(messages[0]!.signatureValid).toBe(true)
+    assert.strictEqual(messages.length, 1)
+    assert.strictEqual(messages[0]!.id, 'msg-002')
+    assert.strictEqual(messages[0]!.from, 'alice@alice.quincemail.com')
+    assert.strictEqual(messages[0]!.to, 'bob@bob.quincemail.com')
+    assert.strictEqual(messages[0]!.subject, 'Test Message')
+    assert.strictEqual(messages[0]!.signatureValid, true)
   })
 
   test('records signatureValid=false for unverified messages', () => {
     storeMessage(testDir, 'msg-003', MIME, 'abcd'.repeat(16), false)
 
     const messages = listMessages(testDir)
-    expect(messages[0]!.signatureValid).toBe(false)
+    assert.strictEqual(messages[0]!.signatureValid, false)
   })
 
   test('appends multiple messages to index', () => {
@@ -138,15 +138,15 @@ describe('inbox storage', () => {
     storeMessage(testDir, 'msg-c', MIME, 'cccc'.repeat(16), false)
 
     const messages = listMessages(testDir)
-    expect(messages).toHaveLength(3)
-    expect(messages[0]!.id).toBe('msg-a')
-    expect(messages[1]!.id).toBe('msg-b')
-    expect(messages[2]!.id).toBe('msg-c')
+    assert.strictEqual(messages.length, 3)
+    assert.strictEqual(messages[0]!.id, 'msg-a')
+    assert.strictEqual(messages[1]!.id, 'msg-b')
+    assert.strictEqual(messages[2]!.id, 'msg-c')
   })
 
   test('empty inbox returns empty list', () => {
     const messages = listMessages(testDir)
-    expect(messages).toHaveLength(0)
+    assert.strictEqual(messages.length, 0)
   })
 })
 
@@ -157,16 +157,16 @@ describe('inbox with signed messages', () => {
     const signed = signMessage(MIME, alice.secretKey)
     const { mime, valid } = verifyMessage(signed, alice.publicKey)
 
-    expect(valid).toBe(true)
+    assert.strictEqual(valid, true)
     storeMessage(testDir, 'verified-001', mime, alice.publicKey, valid)
 
     const messages = listMessages(testDir)
-    expect(messages[0]!.signatureValid).toBe(true)
+    assert.strictEqual(messages[0]!.signatureValid, true)
 
     // .eml should have signature preserved
     const content = fs.readFileSync(path.join(testDir, messages[0]!.file), 'utf8')
-    expect(content).toContain('X-Quince-Signature')
-    expect(content).toContain('Hello from Alice!')
+    assert.ok(content.includes('X-Quince-Signature'))
+    assert.ok(content.includes('Hello from Alice!'))
   })
 
   test('stores unverified message with signatureValid=false', () => {
@@ -174,10 +174,10 @@ describe('inbox with signed messages', () => {
     const signed = signMessage(MIME, alice.secretKey)
     const { mime, valid } = verifyMessage(signed, bob.publicKey) // wrong key
 
-    expect(valid).toBe(false)
+    assert.strictEqual(valid, false)
     storeMessage(testDir, 'unverified-001', mime, bob.publicKey, valid)
 
     const messages = listMessages(testDir)
-    expect(messages[0]!.signatureValid).toBe(false)
+    assert.strictEqual(messages[0]!.signatureValid, false)
   })
 })

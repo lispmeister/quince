@@ -1,5 +1,5 @@
-import fs from 'bare-fs'
-import path from 'bare-path'
+import fs from 'fs'
+import path from 'path'
 import type { InboxEntry } from '../inbox.js'
 
 export interface Pop3SessionConfig {

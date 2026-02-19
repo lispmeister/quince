@@ -1,7 +1,6 @@
-import fs from 'bare-fs'
-import path from 'bare-path'
+import fs from 'fs'
+import path from 'path'
 import crypto from 'hypercore-crypto'
-import b4a from 'b4a'
 import { getConfigDir, ensureConfigDir } from './config.js'
 
 export const EMAIL_DOMAIN = 'quincemail.com'
@@ -43,8 +42,8 @@ function validateSecretKey(secretKey: string): boolean {
 export function generateIdentity(): Identity {
   const keyPair: KeyPair = crypto.keyPair()
   return {
-    publicKey: b4a.toString(keyPair.publicKey, 'hex'),
-    secretKey: b4a.toString(keyPair.secretKey, 'hex')
+    publicKey: keyPair.publicKey.toString('hex'),
+    secretKey: keyPair.secretKey.toString('hex')
   }
 }
 
@@ -166,5 +165,5 @@ export function parseEmailDomain(address: string): ParsedAddress | null {
 
 export function getSwarmTopic(publicKey: string): Buffer {
   // Use the public key directly as the swarm topic
-  return b4a.from(publicKey, 'hex')
+  return Buffer.from(publicKey, 'hex')
 }

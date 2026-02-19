@@ -1,9 +1,10 @@
-import { test, expect, describe, beforeEach } from 'bun:test'
+import { test, describe, beforeEach } from 'node:test'
+import assert from 'node:assert'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import type { HttpRequest } from '../src/http/parser.js'
-import type { HttpContext } from '../src/http/handlers.js'
+import type { HttpRequest } from '../dist/http/parser.js'
+import type { HttpContext } from '../dist/http/handlers.js'
 import {
   handleListInbox,
   handleGetMessage,
@@ -28,7 +29,7 @@ import {
   handleAcceptGateMessage,
   handleRejectGateMessage,
   guessContentType
-} from '../src/http/handlers.js'
+} from '../dist/http/handlers.js'
 
 // Local types to avoid importing bare-fs modules
 interface GatePayment {
@@ -200,39 +201,39 @@ describe('handleListInbox', () => {
     const ctx = makeContext()
     const res = handleListInbox(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(4)
-    expect(data.total).toBe(4)
+    assert.strictEqual(data.messages.length, 4)
+    assert.strictEqual(data.total, 4)
   })
 
   test('filters by from (pubkey)', () => {
     const ctx = makeContext()
     const res = handleListInbox(makeRequest({ query: { from: BOB_PUBKEY } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('msg-2')
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'msg-2')
   })
 
   test('filters by after timestamp', () => {
     const ctx = makeContext()
     const res = handleListInbox(makeRequest({ query: { after: '1700000001000' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(2)
+    assert.strictEqual(data.messages.length, 2)
   })
 
   test('filters by subject', () => {
     const ctx = makeContext()
     const res = handleListInbox(makeRequest({ query: { subject: 'hello' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('msg-1')
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'msg-1')
   })
 
   test('filters by type', () => {
     const ctx = makeContext()
     const res = handleListInbox(makeRequest({ query: { type: 'chat' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('msg-3')
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'msg-3')
   })
 
   test('filters by thread', () => {
@@ -240,26 +241,26 @@ describe('handleListInbox', () => {
     const res = handleListInbox(makeRequest({ query: { thread: '<thread-1>' } }), {}, ctx)
     const data = JSON.parse(res.body)
     // msg-3 has messageId=<thread-1>, msg-4 has inReplyTo=<thread-1>
-    expect(data.messages).toHaveLength(2)
+    assert.strictEqual(data.messages.length, 2)
   })
 
   test('filters by full-text q', () => {
     const ctx = makeContext()
     const res = handleListInbox(makeRequest({ query: { q: 'msg-2' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('msg-2')
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'msg-2')
   })
 
   test('pagination with offset and limit', () => {
     const ctx = makeContext()
     const res = handleListInbox(makeRequest({ query: { offset: '1', limit: '2' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(2)
-    expect(data.messages[0].id).toBe('msg-2')
-    expect(data.total).toBe(4)
-    expect(data.offset).toBe(1)
-    expect(data.limit).toBe(2)
+    assert.strictEqual(data.messages.length, 2)
+    assert.strictEqual(data.messages[0].id, 'msg-2')
+    assert.strictEqual(data.total, 4)
+    assert.strictEqual(data.offset, 1)
+    assert.strictEqual(data.limit, 2)
   })
 })
 
@@ -268,14 +269,14 @@ describe('handleGetMessage', () => {
     const ctx = makeContext()
     const res = handleGetMessage(makeRequest(), { id: 'msg-1' }, ctx)
     const data = JSON.parse(res.body)
-    expect(data.id).toBe('msg-1')
-    expect(data.body).toContain('Body of msg-1')
+    assert.strictEqual(data.id, 'msg-1')
+    assert.ok(data.body.includes('Body of msg-1'))
   })
 
   test('returns 404 for unknown message', () => {
     const ctx = makeContext()
     const res = handleGetMessage(makeRequest(), { id: 'nonexistent' }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 })
 
@@ -283,15 +284,15 @@ describe('handleGetMessageRaw', () => {
   test('returns raw .eml with correct content-type', () => {
     const ctx = makeContext()
     const res = handleGetMessageRaw(makeRequest(), { id: 'msg-1' }, ctx)
-    expect(res.status).toBe(200)
-    expect(res.headers['content-type']).toBe('message/rfc822')
-    expect(res.body).toContain('Subject: Hello')
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(res.headers['content-type'], 'message/rfc822')
+    assert.ok(res.body.includes('Subject: Hello'))
   })
 
   test('returns 404 for unknown message', () => {
     const ctx = makeContext()
     const res = handleGetMessageRaw(makeRequest(), { id: 'nonexistent' }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 })
 
@@ -303,15 +304,15 @@ describe('handleDeleteMessage', () => {
     })
     const res = handleDeleteMessage(makeRequest(), { id: 'msg-1' }, ctx)
     const data = JSON.parse(res.body)
-    expect(data.deleted).toBe(true)
-    expect(data.id).toBe('msg-1')
-    expect(deletedId).toBe('msg-1')
+    assert.strictEqual(data.deleted, true)
+    assert.strictEqual(data.id, 'msg-1')
+    assert.strictEqual(deletedId, 'msg-1')
   })
 
   test('returns 404 for unknown message', () => {
     const ctx = makeContext()
     const res = handleDeleteMessage(makeRequest(), { id: 'nonexistent' }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 })
 
@@ -325,22 +326,22 @@ describe('handleSend', () => {
     })
     const res = await handleSend(req, {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.id).toBe('new-msg-1')
-    expect(data.sent).toBe(true)
+    assert.strictEqual(data.id, 'new-msg-1')
+    assert.strictEqual(data.sent, true)
   })
 
   test('returns 400 for invalid JSON', async () => {
     const ctx = makeContext()
     const req = makeRequest({ body: 'not json' })
     const res = await handleSend(req, {}, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 
   test('returns 400 for missing "to"', async () => {
     const ctx = makeContext()
     const req = makeRequest({ body: JSON.stringify({ subject: 'Hi', body: 'Hello' }) })
     const res = await handleSend(req, {}, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 
   test('returns 202 when queued', async () => {
@@ -351,9 +352,9 @@ describe('handleSend', () => {
       body: JSON.stringify({ to: `alice@${ALICE_PUBKEY}.quincemail.com`, subject: 'Hi', body: 'Hello' })
     })
     const res = await handleSend(req, {}, ctx)
-    expect(res.status).toBe(202)
+    assert.strictEqual(res.status, 202)
     const data = JSON.parse(res.body)
-    expect(data.queued).toBe(true)
+    assert.strictEqual(data.queued, true)
   })
 
   test('returns 422 for unknown peer', async () => {
@@ -364,7 +365,7 @@ describe('handleSend', () => {
       body: JSON.stringify({ to: 'x@nobody.quincemail.com', subject: 'Hi', body: 'Hello' })
     })
     const res = await handleSend(req, {}, ctx)
-    expect(res.status).toBe(422)
+    assert.strictEqual(res.status, 422)
   })
 })
 
@@ -375,11 +376,11 @@ describe('handleListPeers', () => {
     const ctx = makeContext()
     const res = handleListPeers(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.peers).toHaveLength(2)
+    assert.strictEqual(data.peers.length, 2)
     const alice = data.peers.find((p: any) => p.alias === 'alice')
-    expect(alice.online).toBe(true)
+    assert.strictEqual(alice.online, true)
     const bob = data.peers.find((p: any) => p.alias === 'bob')
-    expect(bob.online).toBe(false)
+    assert.strictEqual(bob.online, false)
   })
 })
 
@@ -388,14 +389,14 @@ describe('handlePeerStatus', () => {
     const ctx = makeContext()
     const res = handlePeerStatus(makeRequest(), { pubkey: ALICE_PUBKEY }, ctx)
     const data = JSON.parse(res.body)
-    expect(data.alias).toBe('alice')
-    expect(data.online).toBe(true)
+    assert.strictEqual(data.alias, 'alice')
+    assert.strictEqual(data.online, true)
   })
 
   test('returns 404 for unknown peer', () => {
     const ctx = makeContext()
     const res = handlePeerStatus(makeRequest(), { pubkey: 'c'.repeat(64) }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 })
 
@@ -406,9 +407,9 @@ describe('handleIdentity', () => {
     const ctx = makeContext()
     const res = handleIdentity(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.publicKey).toBe(BOB_PUBKEY)
-    expect(data.address).toContain('quincemail.com')
-    expect(data.username).toBe('bob')
+    assert.strictEqual(data.publicKey, BOB_PUBKEY)
+    assert.ok(data.address.includes('quincemail.com'))
+    assert.strictEqual(data.username, 'bob')
   })
 })
 
@@ -419,7 +420,7 @@ describe('handleTransfers', () => {
     const ctx = makeContext()
     const res = handleTransfers(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.transfers).toEqual([])
+    assert.deepStrictEqual(data.transfers, [])
   })
 
   test('returns transfer list', () => {
@@ -430,7 +431,7 @@ describe('handleTransfers', () => {
     })
     const res = handleTransfers(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.transfers).toHaveLength(1)
+    assert.strictEqual(data.transfers.length, 1)
   })
 })
 
@@ -441,26 +442,26 @@ describe('handleMedia', () => {
     fs.writeFileSync(path.join(testMediaDir, 'test.txt'), 'hello')
     const ctx = makeContext()
     const res = handleMedia(makeRequest(), { '*': 'test.txt' }, ctx)
-    expect(res.status).toBe(200)
-    expect(res.headers['content-type']).toBe('text/plain')
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(res.headers['content-type'], 'text/plain')
   })
 
   test('returns 404 for missing file', () => {
     const ctx = makeContext()
     const res = handleMedia(makeRequest(), { '*': 'missing.txt' }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 
   test('returns 403 for path traversal', () => {
     const ctx = makeContext()
     const res = handleMedia(makeRequest(), { '*': '../etc/passwd' }, ctx)
-    expect(res.status).toBe(403)
+    assert.strictEqual(res.status, 403)
   })
 
   test('returns 403 for absolute path', () => {
     const ctx = makeContext()
     const res = handleMedia(makeRequest(), { '*': '/etc/passwd' }, ctx)
-    expect(res.status).toBe(403)
+    assert.strictEqual(res.status, 403)
   })
 
   test('serves file in subdirectory', () => {
@@ -469,8 +470,8 @@ describe('handleMedia', () => {
     fs.writeFileSync(path.join(subdir, 'photo.jpg'), 'jpegdata')
     const ctx = makeContext()
     const res = handleMedia(makeRequest(), { '*': 'sub/photo.jpg' }, ctx)
-    expect(res.status).toBe(200)
-    expect(res.headers['content-type']).toBe('image/jpeg')
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(res.headers['content-type'], 'image/jpeg')
   })
 })
 
@@ -482,15 +483,15 @@ describe('handleListInbox in-reply-to filter', () => {
     const res = handleListInbox(makeRequest({ query: { 'in-reply-to': '<thread-1>' } }), {}, ctx)
     const data = JSON.parse(res.body)
     // Only msg-4 has inReplyTo=<thread-1>
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('msg-4')
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'msg-4')
   })
 
   test('returns empty when no matches', () => {
     const ctx = makeContext()
     const res = handleListInbox(makeRequest({ query: { 'in-reply-to': '<nonexistent>' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(0)
+    assert.strictEqual(data.messages.length, 0)
   })
 })
 
@@ -504,7 +505,7 @@ describe('handleSend messageId', () => {
     })
     const res = await handleSend(req, {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messageId).toBe('<new-msg-1@quincemail.com>')
+    assert.strictEqual(data.messageId, '<new-msg-1@quincemail.com>')
   })
 })
 
@@ -516,8 +517,8 @@ describe('handleListPeers with capabilities', () => {
     const res = handleListPeers(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
     const alice = data.peers.find((p: any) => p.alias === 'alice')
-    expect(alice.capabilities).toEqual({ name: 'test-agent', version: '1.0' })
-    expect(alice.status).toBe('available')
+    assert.deepStrictEqual(alice.capabilities, { name: 'test-agent', version: '1.0' })
+    assert.strictEqual(alice.status, 'available')
   })
 
   test('returns null capabilities for offline peers', () => {
@@ -525,8 +526,8 @@ describe('handleListPeers with capabilities', () => {
     const res = handleListPeers(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
     const bob = data.peers.find((p: any) => p.alias === 'bob')
-    expect(bob.capabilities).toBeNull()
-    expect(bob.status).toBeNull()
+    assert.strictEqual(bob.capabilities, null)
+    assert.strictEqual(bob.status, null)
   })
 })
 
@@ -537,10 +538,10 @@ describe('handlePeerStatus with extended info', () => {
     const ctx = makeContext()
     const res = handlePeerStatus(makeRequest(), { pubkey: ALICE_PUBKEY }, ctx)
     const data = JSON.parse(res.body)
-    expect(data.connectedSince).toBe(1700000000000)
-    expect(data.lastMessageAt).toBe(1700000001000)
-    expect(data.capabilities).toEqual({ name: 'test-agent', version: '1.0' })
-    expect(data.status).toBe('available')
+    assert.strictEqual(data.connectedSince, 1700000000000)
+    assert.strictEqual(data.lastMessageAt, 1700000001000)
+    assert.deepStrictEqual(data.capabilities, { name: 'test-agent', version: '1.0' })
+    assert.strictEqual(data.status, 'available')
   })
 })
 
@@ -552,29 +553,29 @@ describe('handleSetStatus', () => {
     const req = makeRequest({ body: JSON.stringify({ status: 'busy', message: 'In a meeting' }) })
     const res = handleSetStatus(req, {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.status).toBe('busy')
-    expect(data.message).toBe('In a meeting')
+    assert.strictEqual(data.status, 'busy')
+    assert.strictEqual(data.message, 'In a meeting')
   })
 
   test('rejects invalid status', () => {
     const ctx = makeContext()
     const req = makeRequest({ body: JSON.stringify({ status: 'invalid' }) })
     const res = handleSetStatus(req, {}, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 
   test('rejects missing status', () => {
     const ctx = makeContext()
     const req = makeRequest({ body: JSON.stringify({}) })
     const res = handleSetStatus(req, {}, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 
   test('rejects invalid JSON', () => {
     const ctx = makeContext()
     const req = makeRequest({ body: 'not json' })
     const res = handleSetStatus(req, {}, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 })
 
@@ -585,7 +586,7 @@ describe('handleListIntroductions', () => {
     const ctx = makeContext()
     const res = handleListIntroductions(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.introductions).toEqual([])
+    assert.deepStrictEqual(data.introductions, [])
   })
 
   test('returns introductions from context', () => {
@@ -602,8 +603,8 @@ describe('handleListIntroductions', () => {
     })
     const res = handleListIntroductions(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.introductions).toHaveLength(1)
-    expect(data.introductions[0].alias).toBe('carol')
+    assert.strictEqual(data.introductions.length, 1)
+    assert.strictEqual(data.introductions[0].alias, 'carol')
   })
 })
 
@@ -611,7 +612,7 @@ describe('handleAcceptIntroduction', () => {
   test('returns 404 when no pending introduction', () => {
     const ctx = makeContext()
     const res = handleAcceptIntroduction(makeRequest(), { pubkey: 'c'.repeat(64) }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 
   test('returns accepted intro', () => {
@@ -628,8 +629,8 @@ describe('handleAcceptIntroduction', () => {
     })
     const res = handleAcceptIntroduction(makeRequest(), { pubkey: 'c'.repeat(64) }, ctx)
     const data = JSON.parse(res.body)
-    expect(data.accepted).toBe(true)
-    expect(data.alias).toBe('carol')
+    assert.strictEqual(data.accepted, true)
+    assert.strictEqual(data.alias, 'carol')
   })
 })
 
@@ -637,7 +638,7 @@ describe('handleRejectIntroduction', () => {
   test('returns 404 when no pending introduction', () => {
     const ctx = makeContext()
     const res = handleRejectIntroduction(makeRequest(), { pubkey: 'c'.repeat(64) }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 })
 
@@ -646,21 +647,21 @@ describe('handleSendIntroduction', () => {
     const ctx = makeContext()
     const req = makeRequest({ body: 'not json' })
     const res = handleSendIntroduction(req, { pubkey: ALICE_PUBKEY }, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 
   test('rejects missing pubkey', () => {
     const ctx = makeContext()
     const req = makeRequest({ body: JSON.stringify({ alias: 'carol' }) })
     const res = handleSendIntroduction(req, { pubkey: ALICE_PUBKEY }, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 
   test('rejects invalid pubkey format', () => {
     const ctx = makeContext()
     const req = makeRequest({ body: JSON.stringify({ pubkey: 'not-valid' }) })
     const res = handleSendIntroduction(req, { pubkey: ALICE_PUBKEY }, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 
   test('rejects when recipient not connected', () => {
@@ -668,7 +669,7 @@ describe('handleSendIntroduction', () => {
     const req = makeRequest({ body: JSON.stringify({ pubkey: 'c'.repeat(64) }) })
     // BOB_PUBKEY is not connected in mock
     const res = handleSendIntroduction(req, { pubkey: BOB_PUBKEY }, ctx)
-    expect(res.status).toBe(422)
+    assert.strictEqual(res.status, 422)
   })
 
   test('sends introduction to connected peer', () => {
@@ -687,11 +688,11 @@ describe('handleSendIntroduction', () => {
     })
     const res = handleSendIntroduction(req, { pubkey: ALICE_PUBKEY }, ctx)
     const data = JSON.parse(res.body)
-    expect(data.sent).toBe(true)
-    expect(data.introduced.pubkey).toBe('c'.repeat(64))
-    expect(data.introduced.alias).toBe('carol')
-    expect(sentIntro).not.toBeNull()
-    expect(sentIntro.type).toBe('INTRODUCTION')
+    assert.strictEqual(data.sent, true)
+    assert.strictEqual(data.introduced.pubkey, 'c'.repeat(64))
+    assert.strictEqual(data.introduced.alias, 'carol')
+    assert.notStrictEqual(sentIntro, null)
+    assert.strictEqual(sentIntro.type, 'INTRODUCTION')
   })
 })
 
@@ -713,12 +714,12 @@ describe('handleAddPeer', () => {
     })
     const res = handleAddPeer(req, {}, ctx)
     const data = JSON.parse(res.body)
-    expect(res.status).toBe(200)
-    expect(data.added).toBe(true)
-    expect(data.alias).toBe('carol')
-    expect(data.pubkey).toBe('c'.repeat(64))
-    expect(addedAlias).toBe('carol')
-    expect(addedPubkey).toBe('c'.repeat(64))
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(data.added, true)
+    assert.strictEqual(data.alias, 'carol')
+    assert.strictEqual(data.pubkey, 'c'.repeat(64))
+    assert.strictEqual(addedAlias, 'carol')
+    assert.strictEqual(addedPubkey, 'c'.repeat(64))
   })
 
   test('returns 409 for duplicate alias', () => {
@@ -727,7 +728,7 @@ describe('handleAddPeer', () => {
       body: JSON.stringify({ alias: 'alice', pubkey: 'c'.repeat(64) })
     })
     const res = handleAddPeer(req, {}, ctx)
-    expect(res.status).toBe(409)
+    assert.strictEqual(res.status, 409)
   })
 
   test('returns 400 for invalid pubkey', () => {
@@ -736,21 +737,21 @@ describe('handleAddPeer', () => {
       body: JSON.stringify({ alias: 'carol', pubkey: 'not-valid' })
     })
     const res = handleAddPeer(req, {}, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 
   test('returns 400 for missing fields', () => {
     const ctx = makeContext()
     const req = makeRequest({ body: JSON.stringify({}) })
     const res = handleAddPeer(req, {}, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 
   test('returns 400 for invalid JSON', () => {
     const ctx = makeContext()
     const req = makeRequest({ body: 'not json' })
     const res = handleAddPeer(req, {}, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 
   test('returns 400 for invalid alias', () => {
@@ -759,7 +760,7 @@ describe('handleAddPeer', () => {
       body: JSON.stringify({ alias: 'bad alias!', pubkey: 'c'.repeat(64) })
     })
     const res = handleAddPeer(req, {}, ctx)
-    expect(res.status).toBe(400)
+    assert.strictEqual(res.status, 400)
   })
 })
 
@@ -770,67 +771,67 @@ describe('handleListGateMessages', () => {
     const ctx = makeContext()
     const res = handleListGateMessages(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(3)
-    expect(data.total).toBe(3)
+    assert.strictEqual(data.messages.length, 3)
+    assert.strictEqual(data.total, 3)
   })
 
   test('filters by status=pending', () => {
     const ctx = makeContext()
     const res = handleListGateMessages(makeRequest({ query: { status: 'pending' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('gate-1')
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'gate-1')
   })
 
   test('filters by status=accepted', () => {
     const ctx = makeContext()
     const res = handleListGateMessages(makeRequest({ query: { status: 'accepted' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('gate-2')
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'gate-2')
   })
 
   test('filters by from (senderEmail)', () => {
     const ctx = makeContext()
     const res = handleListGateMessages(makeRequest({ query: { from: 'bank@example.com' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('gate-2')
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'gate-2')
   })
 
   test('filters by subject', () => {
     const ctx = makeContext()
     const res = handleListGateMessages(makeRequest({ query: { subject: 'promo' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('gate-1')
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'gate-1')
   })
 
   test('filters by q (full-text)', () => {
     const ctx = makeContext()
     const res = handleListGateMessages(makeRequest({ query: { q: 'invoice' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('gate-2')
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'gate-2')
   })
 
   test('pagination with offset and limit', () => {
     const ctx = makeContext()
     const res = handleListGateMessages(makeRequest({ query: { offset: '1', limit: '1' } }), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages).toHaveLength(1)
-    expect(data.messages[0].id).toBe('gate-2')
-    expect(data.total).toBe(3)
-    expect(data.offset).toBe(1)
-    expect(data.limit).toBe(1)
+    assert.strictEqual(data.messages.length, 1)
+    assert.strictEqual(data.messages[0].id, 'gate-2')
+    assert.strictEqual(data.total, 3)
+    assert.strictEqual(data.offset, 1)
+    assert.strictEqual(data.limit, 1)
   })
 
   test('includes payment field in list response', () => {
     const ctx = makeContext()
     const res = handleListGateMessages(makeRequest(), {}, ctx)
     const data = JSON.parse(res.body)
-    expect(data.messages[0].payment).toBeDefined()
-    expect(data.messages[0].payment.method).toBe('lightning')
+    assert.notStrictEqual(data.messages[0].payment, undefined)
+    assert.strictEqual(data.messages[0].payment.method, 'lightning')
   })
 })
 
@@ -839,16 +840,16 @@ describe('handleGetGateMessage', () => {
     const ctx = makeContext()
     const res = handleGetGateMessage(makeRequest(), { id: 'gate-1' }, ctx)
     const data = JSON.parse(res.body)
-    expect(data.id).toBe('gate-1')
-    expect(data.body).toContain('Body of gate-1')
-    expect(data.payment).toBeDefined()
-    expect(data.status).toBe('pending')
+    assert.strictEqual(data.id, 'gate-1')
+    assert.ok(data.body.includes('Body of gate-1'))
+    assert.notStrictEqual(data.payment, undefined)
+    assert.strictEqual(data.status, 'pending')
   })
 
   test('returns 404 for unknown id', () => {
     const ctx = makeContext()
     const res = handleGetGateMessage(makeRequest(), { id: 'nonexistent' }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 })
 
@@ -856,15 +857,15 @@ describe('handleGetGateRawMessage', () => {
   test('returns raw .eml with correct content-type', () => {
     const ctx = makeContext()
     const res = handleGetGateRawMessage(makeRequest(), { id: 'gate-1' }, ctx)
-    expect(res.status).toBe(200)
-    expect(res.headers['content-type']).toBe('message/rfc822')
-    expect(res.body).toContain('Subject: Promo')
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(res.headers['content-type'], 'message/rfc822')
+    assert.ok(res.body.includes('Subject: Promo'))
   })
 
   test('returns 404 for unknown id', () => {
     const ctx = makeContext()
     const res = handleGetGateRawMessage(makeRequest(), { id: 'nonexistent' }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 })
 
@@ -876,15 +877,15 @@ describe('handleDeleteGateMessage', () => {
     })
     const res = handleDeleteGateMessage(makeRequest(), { id: 'gate-1' }, ctx)
     const data = JSON.parse(res.body)
-    expect(data.deleted).toBe(true)
-    expect(data.id).toBe('gate-1')
-    expect(deletedId).toBe('gate-1')
+    assert.strictEqual(data.deleted, true)
+    assert.strictEqual(data.id, 'gate-1')
+    assert.strictEqual(deletedId, 'gate-1')
   })
 
   test('returns 404 for unknown id', () => {
     const ctx = makeContext()
     const res = handleDeleteGateMessage(makeRequest(), { id: 'nonexistent' }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 })
 
@@ -915,21 +916,21 @@ describe('handleAcceptGateMessage', () => {
     })
     const res = handleAcceptGateMessage(makeRequest({ method: 'POST' }), { id: 'gate-1' }, ctx)
     const data = JSON.parse(res.body)
-    expect(res.status).toBe(200)
-    expect(data.accepted).toBe(true)
-    expect(data.id).toBe('gate-1')
-    expect(data.senderWhitelisted).toBe(true)
-    expect(updatedId).toBe('gate-1')
-    expect(updatedStatus).toBe('accepted')
-    expect(storedId).toBe('gate-1')
-    expect(storedPubkey).toBe('legacy-gateway')
-    expect(whitelistedValue).toBe('sender@example.com')
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(data.accepted, true)
+    assert.strictEqual(data.id, 'gate-1')
+    assert.strictEqual(data.senderWhitelisted, true)
+    assert.strictEqual(updatedId, 'gate-1')
+    assert.strictEqual(updatedStatus, 'accepted')
+    assert.strictEqual(storedId, 'gate-1')
+    assert.strictEqual(storedPubkey, 'legacy-gateway')
+    assert.strictEqual(whitelistedValue, 'sender@example.com')
   })
 
   test('returns 404 for unknown id', () => {
     const ctx = makeContext()
     const res = handleAcceptGateMessage(makeRequest({ method: 'POST' }), { id: 'nonexistent' }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 })
 
@@ -951,17 +952,17 @@ describe('handleRejectGateMessage', () => {
     })
     const res = handleRejectGateMessage(makeRequest({ method: 'POST' }), { id: 'gate-1' }, ctx)
     const data = JSON.parse(res.body)
-    expect(res.status).toBe(200)
-    expect(data.rejected).toBe(true)
-    expect(data.id).toBe('gate-1')
-    expect(updatedId).toBe('gate-1')
-    expect(updatedStatus).toBe('rejected')
-    expect(whitelistCalled).toBe(false)
+    assert.strictEqual(res.status, 200)
+    assert.strictEqual(data.rejected, true)
+    assert.strictEqual(data.id, 'gate-1')
+    assert.strictEqual(updatedId, 'gate-1')
+    assert.strictEqual(updatedStatus, 'rejected')
+    assert.strictEqual(whitelistCalled, false)
   })
 
   test('returns 404 for unknown id', () => {
     const ctx = makeContext()
     const res = handleRejectGateMessage(makeRequest({ method: 'POST' }), { id: 'nonexistent' }, ctx)
-    expect(res.status).toBe(404)
+    assert.strictEqual(res.status, 404)
   })
 })

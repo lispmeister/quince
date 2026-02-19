@@ -1,4 +1,5 @@
-import { test, expect, describe, beforeEach, afterEach } from 'bun:test'
+import { test, describe, beforeEach, afterEach } from 'node:test'
+import assert from 'node:assert'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -203,23 +204,23 @@ afterEach(() => {
 
 test('addRule creates and persists a rule', () => {
   const rule = addRuleToFile('accept', { from: 'alice@example.com' })
-  expect(rule.id).toBeString()
-  expect(rule.action).toBe('accept')
-  expect(rule.conditions.from).toBe('alice@example.com')
-  expect(rule.createdAt).toBeNumber()
+  assert.strictEqual(typeof rule.id, 'string')
+  assert.strictEqual(rule.action, 'accept')
+  assert.strictEqual(rule.conditions.from, 'alice@example.com')
+  assert.strictEqual(typeof rule.createdAt, 'number')
 
   const rules = loadRulesFromFile()
-  expect(rules).toHaveLength(1)
-  expect(rules[0]!.id).toBe(rule.id)
+  assert.strictEqual(rules.length, 1)
+  assert.strictEqual(rules[0]!.id, rule.id)
 })
 
 test('addRule appends multiple rules in order', () => {
   addRuleToFile('accept', { from: 'a@a.com' })
   addRuleToFile('reject', { fromDomain: 'spam.com' })
   const rules = loadRulesFromFile()
-  expect(rules).toHaveLength(2)
-  expect(rules[0]!.action).toBe('accept')
-  expect(rules[1]!.action).toBe('reject')
+  assert.strictEqual(rules.length, 2)
+  assert.strictEqual(rules[0]!.action, 'accept')
+  assert.strictEqual(rules[1]!.action, 'reject')
 })
 
 // --- updateRule ---
@@ -227,18 +228,18 @@ test('addRule appends multiple rules in order', () => {
 test('updateRule updates existing rule', () => {
   const rule = addRuleToFile('accept', { from: 'alice@example.com' })
   const updated = updateRuleInFile(rule.id, 'reject', { subjectContains: 'spam' })
-  expect(updated).not.toBeNull()
-  expect(updated!.action).toBe('reject')
-  expect(updated!.conditions.subjectContains).toBe('spam')
-  expect(updated!.conditions.from).toBeUndefined()
+  assert.notStrictEqual(updated, null)
+  assert.strictEqual(updated!.action, 'reject')
+  assert.strictEqual(updated!.conditions.subjectContains, 'spam')
+  assert.strictEqual(updated!.conditions.from, undefined)
 
   const rules = loadRulesFromFile()
-  expect(rules[0]!.action).toBe('reject')
+  assert.strictEqual(rules[0]!.action, 'reject')
 })
 
 test('updateRule returns null for unknown id', () => {
   const result = updateRuleInFile('nonexistent', 'accept', {})
-  expect(result).toBeNull()
+  assert.strictEqual(result, null)
 })
 
 // --- removeRule ---
@@ -246,12 +247,12 @@ test('updateRule returns null for unknown id', () => {
 test('removeRule deletes a rule', () => {
   const rule = addRuleToFile('accept', { from: 'alice@example.com' })
   const removed = removeRuleFromFile(rule.id)
-  expect(removed).toBe(true)
-  expect(loadRulesFromFile()).toHaveLength(0)
+  assert.strictEqual(removed, true)
+  assert.strictEqual(loadRulesFromFile().length, 0)
 })
 
 test('removeRule returns false for unknown id', () => {
-  expect(removeRuleFromFile('no-such-id')).toBe(false)
+  assert.strictEqual(removeRuleFromFile('no-such-id'), false)
 })
 
 // --- reorderRules ---
@@ -262,7 +263,7 @@ test('reorderRules reorders by provided id array', () => {
   const r3 = addRuleToFile('accept', { subjectContains: 'urgent' })
 
   const reordered = reorderRulesInFile([r3.id, r1.id, r2.id])
-  expect(reordered.map(r => r.id)).toEqual([r3.id, r1.id, r2.id])
+  assert.deepStrictEqual(reordered.map(r => r.id), [r3.id, r1.id, r2.id])
 })
 
 test('reorderRules appends unlisted rules at the end', () => {
@@ -271,101 +272,101 @@ test('reorderRules appends unlisted rules at the end', () => {
   const r3 = addRuleToFile('accept', { subjectContains: 'urgent' })
 
   const reordered = reorderRulesInFile([r2.id])
-  expect(reordered[0]!.id).toBe(r2.id)
+  assert.strictEqual(reordered[0]!.id, r2.id)
   const remaining = reordered.slice(1).map(r => r.id)
-  expect(remaining).toContain(r1.id)
-  expect(remaining).toContain(r3.id)
+  assert.ok(remaining.includes(r1.id))
+  assert.ok(remaining.includes(r3.id))
 })
 
 // --- evaluateRules ---
 
 test('evaluateRules: no rules → pending', () => {
-  expect(evaluateRules([], makeEntry(), '')).toBe('pending')
+  assert.strictEqual(evaluateRules([], makeEntry(), ''), 'pending')
 })
 
 test('evaluateRules: from exact match → accept', () => {
   const rules: GateRule[] = [{ id: '1', action: 'accept', conditions: { from: 'alice@example.com' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com' }), '')).toBe('accept')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com' }), ''), 'accept')
 })
 
 test('evaluateRules: from exact match is case-insensitive', () => {
   const rules: GateRule[] = [{ id: '1', action: 'reject', conditions: { from: 'ALICE@EXAMPLE.COM' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com' }), '')).toBe('reject')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com' }), ''), 'reject')
 })
 
 test('evaluateRules: from mismatch → pending', () => {
   const rules: GateRule[] = [{ id: '1', action: 'accept', conditions: { from: 'bob@example.com' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com' }), '')).toBe('pending')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com' }), ''), 'pending')
 })
 
 test('evaluateRules: fromDomain exact match → accept', () => {
   const rules: GateRule[] = [{ id: '1', action: 'accept', conditions: { fromDomain: 'github.com' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry({ senderEmail: 'noreply@github.com' }), '')).toBe('accept')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ senderEmail: 'noreply@github.com' }), ''), 'accept')
 })
 
 test('evaluateRules: wildcard domain *.github.com matches github.com', () => {
   const rules: GateRule[] = [{ id: '1', action: 'accept', conditions: { fromDomain: '*.github.com' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry({ senderEmail: 'a@github.com' }), '')).toBe('accept')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ senderEmail: 'a@github.com' }), ''), 'accept')
 })
 
 test('evaluateRules: wildcard domain *.github.com matches sub.github.com', () => {
   const rules: GateRule[] = [{ id: '1', action: 'accept', conditions: { fromDomain: '*.github.com' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry({ senderEmail: 'a@sub.github.com' }), '')).toBe('accept')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ senderEmail: 'a@sub.github.com' }), ''), 'accept')
 })
 
 test('evaluateRules: wildcard domain *.github.com does not match othergithub.com', () => {
   const rules: GateRule[] = [{ id: '1', action: 'accept', conditions: { fromDomain: '*.github.com' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry({ senderEmail: 'a@othergithub.com' }), '')).toBe('pending')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ senderEmail: 'a@othergithub.com' }), ''), 'pending')
 })
 
 test('evaluateRules: subjectContains match (case-insensitive)', () => {
   const rules: GateRule[] = [{ id: '1', action: 'reject', conditions: { subjectContains: 'URGENT' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry({ subject: 'This is urgent please read' }), '')).toBe('reject')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ subject: 'This is urgent please read' }), ''), 'reject')
 })
 
 test('evaluateRules: subjectContains mismatch → pending', () => {
   const rules: GateRule[] = [{ id: '1', action: 'reject', conditions: { subjectContains: 'SPAM' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry({ subject: 'Hello World' }), '')).toBe('pending')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ subject: 'Hello World' }), ''), 'pending')
 })
 
 test('evaluateRules: bodyContains match', () => {
   const rules: GateRule[] = [{ id: '1', action: 'reject', conditions: { bodyContains: 'buy now' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry(), 'Click here to BUY NOW and save!')).toBe('reject')
+  assert.strictEqual(evaluateRules(rules, makeEntry(), 'Click here to BUY NOW and save!'), 'reject')
 })
 
 test('evaluateRules: bodyContains mismatch → pending', () => {
   const rules: GateRule[] = [{ id: '1', action: 'reject', conditions: { bodyContains: 'buy now' }, createdAt: 0 }]
-  expect(evaluateRules(rules, makeEntry(), 'Hello, how are you?')).toBe('pending')
+  assert.strictEqual(evaluateRules(rules, makeEntry(), 'Hello, how are you?'), 'pending')
 })
 
 test('evaluateRules: headerMatch matches', () => {
   const rules: GateRule[] = [{ id: '1', action: 'accept', conditions: { headerMatch: { name: 'X-Mailer', value: 'sendgrid' } }, createdAt: 0 }]
   const body = 'X-Mailer: SendGrid v7\r\nContent-Type: text/plain\r\n\r\nHello'
-  expect(evaluateRules(rules, makeEntry(), body)).toBe('accept')
+  assert.strictEqual(evaluateRules(rules, makeEntry(), body), 'accept')
 })
 
 test('evaluateRules: headerMatch mismatch → pending', () => {
   const rules: GateRule[] = [{ id: '1', action: 'accept', conditions: { headerMatch: { name: 'X-Mailer', value: 'sendgrid' } }, createdAt: 0 }]
   const body = 'X-Mailer: Mailchimp\r\n\r\nHello'
-  expect(evaluateRules(rules, makeEntry(), body)).toBe('pending')
+  assert.strictEqual(evaluateRules(rules, makeEntry(), body), 'pending')
 })
 
 test('evaluateRules: hasAttachment true matches multipart MIME', () => {
   const rules: GateRule[] = [{ id: '1', action: 'reject', conditions: { hasAttachment: true }, createdAt: 0 }]
   const body = 'Content-Type: multipart/mixed; boundary="abc"\r\n\r\n--abc\r\nContent-Type: text/plain\r\nHello'
-  expect(evaluateRules(rules, makeEntry(), body)).toBe('reject')
+  assert.strictEqual(evaluateRules(rules, makeEntry(), body), 'reject')
 })
 
 test('evaluateRules: hasAttachment false does not match multipart', () => {
   const rules: GateRule[] = [{ id: '1', action: 'reject', conditions: { hasAttachment: false }, createdAt: 0 }]
   const body = 'Content-Type: multipart/mixed; boundary="abc"\r\n\r\nHello'
-  expect(evaluateRules(rules, makeEntry(), body)).toBe('pending')
+  assert.strictEqual(evaluateRules(rules, makeEntry(), body), 'pending')
 })
 
 test('evaluateRules: hasAttachment true matches Content-Disposition attachment', () => {
   const rules: GateRule[] = [{ id: '1', action: 'reject', conditions: { hasAttachment: true }, createdAt: 0 }]
   const body = 'Content-Disposition: attachment; filename="file.pdf"\r\n\r\ndata'
-  expect(evaluateRules(rules, makeEntry(), body)).toBe('reject')
+  assert.strictEqual(evaluateRules(rules, makeEntry(), body), 'reject')
 })
 
 test('evaluateRules: first-match-wins ordering', () => {
@@ -373,7 +374,7 @@ test('evaluateRules: first-match-wins ordering', () => {
     { id: '1', action: 'accept', conditions: { from: 'alice@example.com' }, createdAt: 0 },
     { id: '2', action: 'reject', conditions: { from: 'alice@example.com' }, createdAt: 0 }
   ]
-  expect(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com' }), '')).toBe('accept')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com' }), ''), 'accept')
 })
 
 test('evaluateRules: AND conditions — all must match', () => {
@@ -381,9 +382,9 @@ test('evaluateRules: AND conditions — all must match', () => {
     { id: '1', action: 'reject', conditions: { from: 'alice@example.com', subjectContains: 'invoice' }, createdAt: 0 }
   ]
   // Only from matches, not subject → no match
-  expect(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com', subject: 'Hello' }), '')).toBe('pending')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com', subject: 'Hello' }), ''), 'pending')
   // Both match → reject
-  expect(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com', subject: 'Your Invoice #42' }), '')).toBe('reject')
+  assert.strictEqual(evaluateRules(rules, makeEntry({ senderEmail: 'alice@example.com', subject: 'Your Invoice #42' }), ''), 'reject')
 })
 
 test('evaluateRules: AND conditions — fromDomain + bodyContains', () => {
@@ -391,6 +392,6 @@ test('evaluateRules: AND conditions — fromDomain + bodyContains', () => {
     { id: '1', action: 'accept', conditions: { fromDomain: 'bank.com', bodyContains: 'statement' }, createdAt: 0 }
   ]
   const entry = makeEntry({ senderEmail: 'noreply@bank.com' })
-  expect(evaluateRules(rules, entry, 'Your monthly statement is ready')).toBe('accept')
-  expect(evaluateRules(rules, entry, 'Click here to reset your password')).toBe('pending')
+  assert.strictEqual(evaluateRules(rules, entry, 'Your monthly statement is ready'), 'accept')
+  assert.strictEqual(evaluateRules(rules, entry, 'Click here to reset your password'), 'pending')
 })

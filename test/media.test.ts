@@ -1,4 +1,5 @@
-import { test, expect, describe, beforeAll, afterAll } from 'bun:test'
+import { test, describe, before, after } from 'node:test'
+import assert from 'node:assert'
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -109,24 +110,24 @@ function transformFileRefsFailed(body: string, fileNames: string[]): string {
 describe('parseFileRefs', () => {
   test('extracts single file ref', () => {
     const refs = parseFileRefs('Check this: quince:/media/photo.jpg')
-    expect(refs).toEqual([{ name: 'photo.jpg', uri: 'quince:/media/photo.jpg' }])
+    assert.deepStrictEqual(refs, [{ name: 'photo.jpg', uri: 'quince:/media/photo.jpg' }])
   })
 
   test('extracts multiple file refs', () => {
     const refs = parseFileRefs('Files: quince:/media/a.jpg and quince:/media/b.pdf')
-    expect(refs).toHaveLength(2)
-    expect(refs[0]!.name).toBe('a.jpg')
-    expect(refs[1]!.name).toBe('b.pdf')
+    assert.strictEqual(refs.length, 2)
+    assert.strictEqual(refs[0]!.name, 'a.jpg')
+    assert.strictEqual(refs[1]!.name, 'b.pdf')
   })
 
   test('deduplicates same file', () => {
     const refs = parseFileRefs('quince:/media/photo.jpg see quince:/media/photo.jpg')
-    expect(refs).toHaveLength(1)
+    assert.strictEqual(refs.length, 1)
   })
 
   test('returns empty for no refs', () => {
     const refs = parseFileRefs('Just a normal email body')
-    expect(refs).toHaveLength(0)
+    assert.strictEqual(refs.length, 0)
   })
 
   test('rejects path traversal (..)', () => {
@@ -134,19 +135,19 @@ describe('parseFileRefs', () => {
     const refs = parseFileRefs('quince:/media/../etc/passwd')
     // The regex matches '..' as a valid filename (dots are allowed), but it contains path traversal
     // Actually our regex [a-zA-Z0-9._-]+ DOES match '..' — but our post-check rejects it
-    expect(refs).toHaveLength(0)
+    assert.strictEqual(refs.length, 0)
   })
 
   test('allows valid filenames with dots, hyphens, underscores', () => {
     const refs = parseFileRefs('quince:/media/my-file_v2.tar.gz')
-    expect(refs).toHaveLength(1)
-    expect(refs[0]!.name).toBe('my-file_v2.tar.gz')
+    assert.strictEqual(refs.length, 1)
+    assert.strictEqual(refs[0]!.name, 'my-file_v2.tar.gz')
   })
 
   test('stops at spaces in filenames', () => {
     const refs = parseFileRefs('quince:/media/bad file.jpg')
-    expect(refs).toHaveLength(1)
-    expect(refs[0]!.name).toBe('bad')
+    assert.strictEqual(refs.length, 1)
+    assert.strictEqual(refs[0]!.name, 'bad')
   })
 })
 
@@ -154,27 +155,27 @@ describe('validateFileRefs', () => {
   const testMediaDir = getMediaDir()
   const testFile = join(testMediaDir, '__test_validate.txt')
 
-  beforeAll(() => {
+  before(() => {
     mkdirSync(testMediaDir, { recursive: true })
     writeFileSync(testFile, 'test content')
   })
 
-  afterAll(() => {
+  after(() => {
     if (existsSync(testFile)) rmSync(testFile)
   })
 
   test('valid ref when file exists', () => {
     const refs = [{ name: '__test_validate.txt', uri: 'quince:/media/__test_validate.txt' }]
     const { valid, missing } = validateFileRefs(refs)
-    expect(valid).toHaveLength(1)
-    expect(missing).toHaveLength(0)
+    assert.strictEqual(valid.length, 1)
+    assert.strictEqual(missing.length, 0)
   })
 
   test('missing ref when file does not exist', () => {
     const refs = [{ name: 'nonexistent_12345.txt', uri: 'quince:/media/nonexistent_12345.txt' }]
     const { valid, missing } = validateFileRefs(refs)
-    expect(valid).toHaveLength(0)
-    expect(missing).toHaveLength(1)
+    assert.strictEqual(valid.length, 0)
+    assert.strictEqual(missing.length, 1)
   })
 })
 
@@ -184,10 +185,10 @@ describe('transformFileRefs', () => {
   test('replaces URI with local path using pubkey dir', () => {
     const body = 'See: quince:/media/photo.jpg done'
     const result = transformFileRefs(body, fakePubkey, [{ name: 'photo.jpg', size: 10485760 }])
-    expect(result).toContain('[photo.jpg')
-    expect(result).toContain('10.0 MB')
-    expect(result).toContain(`${fakePubkey}/photo.jpg`)
-    expect(result).not.toContain('quince:/media/')
+    assert.ok(result.includes('[photo.jpg'))
+    assert.ok(result.includes('10.0 MB'))
+    assert.ok(result.includes(`${fakePubkey}/photo.jpg`))
+    assert.ok(!result.includes('quince:/media/'))
   })
 
   test('replaces multiple refs', () => {
@@ -196,21 +197,21 @@ describe('transformFileRefs', () => {
       { name: 'a.jpg', size: 1024 },
       { name: 'b.pdf', size: 2048 }
     ])
-    expect(result).toContain('[a.jpg')
-    expect(result).toContain('[b.pdf')
-    expect(result).not.toContain('quince:/media/')
+    assert.ok(result.includes('[a.jpg'))
+    assert.ok(result.includes('[b.pdf'))
+    assert.ok(!result.includes('quince:/media/'))
   })
 
   test('leaves body unchanged when no refs match', () => {
     const body = 'no file refs here'
     const result = transformFileRefs(body, fakePubkey, [])
-    expect(result).toBe('no file refs here')
+    assert.strictEqual(result, 'no file refs here')
   })
 
   test('formats sizes correctly', () => {
     const body = 'quince:/media/tiny.txt'
     const result = transformFileRefs(body, fakePubkey, [{ name: 'tiny.txt', size: 512 }])
-    expect(result).toContain('512 B')
+    assert.ok(result.includes('512 B'))
   })
 })
 
@@ -218,49 +219,49 @@ describe('transformFileRefsFailed', () => {
   test('replaces single ref with failure marker', () => {
     const body = 'See: quince:/media/photo.jpg done'
     const result = transformFileRefsFailed(body, ['photo.jpg'])
-    expect(result).toBe('See: [photo.jpg — transfer failed] done')
+    assert.strictEqual(result, 'See: [photo.jpg — transfer failed] done')
   })
 
   test('replaces multiple refs with failure markers', () => {
     const body = 'quince:/media/a.jpg and quince:/media/b.pdf'
     const result = transformFileRefsFailed(body, ['a.jpg', 'b.pdf'])
-    expect(result).toContain('[a.jpg — transfer failed]')
-    expect(result).toContain('[b.pdf — transfer failed]')
-    expect(result).not.toContain('quince:/media/')
+    assert.ok(result.includes('[a.jpg — transfer failed]'))
+    assert.ok(result.includes('[b.pdf — transfer failed]'))
+    assert.ok(!result.includes('quince:/media/'))
   })
 
   test('leaves body unchanged for unmatched file names', () => {
     const body = 'quince:/media/photo.jpg'
     const result = transformFileRefsFailed(body, ['other.jpg'])
-    expect(result).toBe('quince:/media/photo.jpg')
+    assert.strictEqual(result, 'quince:/media/photo.jpg')
   })
 })
 
 describe('uniqueFileName', () => {
   const testDir = join(homedir(), '.quince', 'media', '__test_dedup')
 
-  beforeAll(() => {
+  before(() => {
     mkdirSync(testDir, { recursive: true })
     writeFileSync(join(testDir, 'photo.jpg'), 'existing')
     writeFileSync(join(testDir, 'photo-1.jpg'), 'existing')
     writeFileSync(join(testDir, 'noext'), 'existing')
   })
 
-  afterAll(() => {
+  after(() => {
     rmSync(testDir, { recursive: true })
   })
 
   test('returns original name when no conflict', () => {
-    expect(uniqueFileName(testDir, 'newfile.txt')).toBe('newfile.txt')
+    assert.strictEqual(uniqueFileName(testDir, 'newfile.txt'), 'newfile.txt')
   })
 
   test('appends -1 when file exists', () => {
     // photo.jpg exists, photo-1.jpg also exists → photo-2.jpg
-    expect(uniqueFileName(testDir, 'photo.jpg')).toBe('photo-2.jpg')
+    assert.strictEqual(uniqueFileName(testDir, 'photo.jpg'), 'photo-2.jpg')
   })
 
   test('handles files without extension', () => {
-    expect(uniqueFileName(testDir, 'noext')).toBe('noext-1')
+    assert.strictEqual(uniqueFileName(testDir, 'noext'), 'noext-1')
   })
 })
 
@@ -272,9 +273,9 @@ describe('transformFileRefs with localName', () => {
     const result = transformFileRefs(body, fakePubkey, [
       { name: 'photo.jpg', localName: 'photo-1.jpg', size: 1024 }
     ])
-    expect(result).toContain('[photo-1.jpg')
-    expect(result).toContain(`${fakePubkey}/photo-1.jpg`)
-    expect(result).not.toContain('quince:/media/')
+    assert.ok(result.includes('[photo-1.jpg'))
+    assert.ok(result.includes(`${fakePubkey}/photo-1.jpg`))
+    assert.ok(!result.includes('quince:/media/'))
   })
 
   test('falls back to name when localName not provided', () => {
@@ -282,7 +283,7 @@ describe('transformFileRefs with localName', () => {
     const result = transformFileRefs(body, fakePubkey, [
       { name: 'photo.jpg', size: 1024 }
     ])
-    expect(result).toContain('[photo.jpg')
-    expect(result).toContain(`${fakePubkey}/photo.jpg`)
+    assert.ok(result.includes('[photo.jpg'))
+    assert.ok(result.includes(`${fakePubkey}/photo.jpg`))
   })
 })

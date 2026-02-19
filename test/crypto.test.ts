@@ -1,13 +1,13 @@
-import { test, expect, describe } from 'bun:test'
+import { test, describe } from 'node:test'
+import assert from 'node:assert'
 import crypto from 'hypercore-crypto'
-import b4a from 'b4a'
-import { signMessage, verifyMessage, signIntroduction, verifyIntroduction } from '../src/crypto.js'
+import { signMessage, verifyMessage, signIntroduction, verifyIntroduction } from '../dist/crypto.js'
 
 function makeKeyPair() {
   const kp = (crypto as any).keyPair()
   return {
-    publicKey: b4a.toString(kp.publicKey, 'hex'),
-    secretKey: b4a.toString(kp.secretKey, 'hex')
+    publicKey: kp.publicKey.toString('hex'),
+    secretKey: kp.secretKey.toString('hex')
   }
 }
 
@@ -24,7 +24,7 @@ describe('signMessage', () => {
     const alice = makeKeyPair()
     const signed = signMessage(VALID_MIME, alice.secretKey)
 
-    expect(signed).toContain('X-Quince-Signature:')
+    assert.ok(signed.includes('X-Quince-Signature:'))
   })
 
   test('preserves the message body', () => {
@@ -32,7 +32,7 @@ describe('signMessage', () => {
     const signed = signMessage(VALID_MIME, alice.secretKey)
 
     const body = signed.split('\r\n\r\n').slice(1).join('\r\n\r\n')
-    expect(body).toBe('Hello, Bob!')
+    assert.strictEqual(body, 'Hello, Bob!')
   })
 
   test('passes through malformed MIME without separator', () => {
@@ -41,8 +41,8 @@ describe('signMessage', () => {
     const result = signMessage(malformed, alice.secretKey)
 
     // Should return unchanged — no crash, no signature
-    expect(result).toBe(malformed)
-    expect(result).not.toContain('X-Quince-Signature')
+    assert.strictEqual(result, malformed)
+    assert.ok(!result.includes('X-Quince-Signature'))
   })
 })
 
@@ -52,8 +52,8 @@ describe('verifyMessage', () => {
     const signed = signMessage(VALID_MIME, alice.secretKey)
     const { mime, valid } = verifyMessage(signed, alice.publicKey)
 
-    expect(valid).toBe(true)
-    expect(mime).toBe(signed)
+    assert.strictEqual(valid, true)
+    assert.strictEqual(mime, signed)
   })
 
   test('wrong pubkey returns valid=false', () => {
@@ -63,7 +63,7 @@ describe('verifyMessage', () => {
     const signed = signMessage(VALID_MIME, alice.secretKey)
     const { valid } = verifyMessage(signed, bob.publicKey)
 
-    expect(valid).toBe(false)
+    assert.strictEqual(valid, false)
   })
 
   test('tampered body returns valid=false', () => {
@@ -74,14 +74,14 @@ describe('verifyMessage', () => {
     const tampered = signed.replace('Hello, Bob!', 'Hello, Eve!')
     const { valid } = verifyMessage(tampered, alice.publicKey)
 
-    expect(valid).toBe(false)
+    assert.strictEqual(valid, false)
   })
 
   test('missing signature header returns valid=false', () => {
     const alice = makeKeyPair()
     const { valid } = verifyMessage(VALID_MIME, alice.publicKey)
 
-    expect(valid).toBe(false)
+    assert.strictEqual(valid, false)
   })
 
   test('malformed signature hex returns valid=false', () => {
@@ -92,7 +92,7 @@ describe('verifyMessage', () => {
     )
     const { valid } = verifyMessage(forged, alice.publicKey)
 
-    expect(valid).toBe(false)
+    assert.strictEqual(valid, false)
   })
 
   test('preserves signature header in returned MIME', () => {
@@ -100,8 +100,8 @@ describe('verifyMessage', () => {
     const signed = signMessage(VALID_MIME, alice.secretKey)
     const { mime } = verifyMessage(signed, alice.publicKey)
 
-    expect(mime).toContain('X-Quince-Signature')
-    expect(mime).toBe(signed)
+    assert.ok(mime.includes('X-Quince-Signature'))
+    assert.strictEqual(mime, signed)
   })
 })
 
@@ -110,7 +110,7 @@ describe('signIntroduction', () => {
     const alice = makeKeyPair()
     const introduced = { pubkey: 'b'.repeat(64), alias: 'bob' }
     const sig = signIntroduction(introduced, alice.secretKey)
-    expect(sig).toMatch(/^[a-f0-9]{128}$/)
+    assert.ok(/^[a-f0-9]{128}$/.test(sig))
   })
 })
 
@@ -120,7 +120,7 @@ describe('verifyIntroduction', () => {
     const introduced = { pubkey: 'b'.repeat(64), alias: 'bob' }
     const sig = signIntroduction(introduced, alice.secretKey)
     const valid = verifyIntroduction(introduced, sig, alice.publicKey)
-    expect(valid).toBe(true)
+    assert.strictEqual(valid, true)
   })
 
   test('wrong key returns false', () => {
@@ -129,7 +129,7 @@ describe('verifyIntroduction', () => {
     const introduced = { pubkey: 'c'.repeat(64), alias: 'carol' }
     const sig = signIntroduction(introduced, alice.secretKey)
     const valid = verifyIntroduction(introduced, sig, bob.publicKey)
-    expect(valid).toBe(false)
+    assert.strictEqual(valid, false)
   })
 
   test('tampered data returns false', () => {
@@ -138,13 +138,13 @@ describe('verifyIntroduction', () => {
     const sig = signIntroduction(introduced, alice.secretKey)
     const tampered = { pubkey: 'c'.repeat(64), alias: 'bob' }
     const valid = verifyIntroduction(tampered, sig, alice.publicKey)
-    expect(valid).toBe(false)
+    assert.strictEqual(valid, false)
   })
 
   test('malformed signature returns false', () => {
     const alice = makeKeyPair()
     const introduced = { pubkey: 'b'.repeat(64) }
     const valid = verifyIntroduction(introduced, 'not-valid-hex', alice.publicKey)
-    expect(valid).toBe(false)
+    assert.strictEqual(valid, false)
   })
 })

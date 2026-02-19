@@ -18,7 +18,7 @@ BOB_POP3_PORT=1111
 ALICE_HTTP_PORT=2580
 BOB_HTTP_PORT=2581
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BARE="$PROJECT_DIR/node_modules/.bin/bare"
+NODE="node"
 QUINCE="$PROJECT_DIR/dist/index.js"
 
 # Test results
@@ -77,7 +77,7 @@ setup_test_env() {
 build_project() {
   log "Building project..."
   cd "$PROJECT_DIR"
-  if ! bun run build > /dev/null 2>&1; then
+  if ! npm run build > /dev/null 2>&1; then
     echo "Build failed!"
     exit 1
   fi
@@ -85,7 +85,7 @@ build_project() {
 
 get_pubkey() {
   local home=$1
-  HOME="$home" "$BARE" "$QUINCE" identity 2>/dev/null | grep "Public key:" | head -1 | awk '{print $3}'
+  HOME="$home" "$NODE" "$QUINCE" identity 2>/dev/null | grep "Public key:" | head -1 | awk '{print $3}'
 }
 
 start_daemon() {
@@ -96,7 +96,7 @@ start_daemon() {
   local http_port=$5
 
   log "Starting $name daemon on port $port (POP3: $pop3_port, HTTP: $http_port)..."
-  HOME="$home" SMTP_PORT="$port" POP3_PORT="$pop3_port" HTTP_PORT="$http_port" "$BARE" "$QUINCE" start > "$home/daemon.log" 2>&1 &
+  HOME="$home" SMTP_PORT="$port" POP3_PORT="$pop3_port" HTTP_PORT="$http_port" "$NODE" "$QUINCE" start > "$home/daemon.log" 2>&1 &
   echo $! > "$home/daemon.pid"
 }
 
@@ -191,10 +191,10 @@ pop3_session() {
 
 run_unit_tests() {
   TESTS_RUN=$((TESTS_RUN + 1))
-  log "Test: Unit & crypto tests (bun test)"
+  log "Test: Unit tests (npm test)"
 
   local output
-  output=$(cd "$PROJECT_DIR" && bun test test/ 2>&1)
+  output=$(cd "$PROJECT_DIR" && npm test 2>&1)
   local exit_code=$?
 
   if [ $exit_code -eq 0 ]; then

@@ -1,4 +1,4 @@
-import tcp from 'bare-tcp'
+import net from 'net'
 import { Pop3Session, type Pop3SessionConfig } from './session.js'
 
 export interface Pop3ServerConfig {
@@ -12,7 +12,7 @@ export interface Pop3ServerConfig {
 }
 
 export class Pop3Server {
-  private server: ReturnType<typeof tcp.createServer> | null = null
+  private server: ReturnType<typeof net.createServer> | null = null
   private config: Pop3ServerConfig
 
   constructor(config: Pop3ServerConfig) {
@@ -21,7 +21,7 @@ export class Pop3Server {
 
   start(): Promise<number> {
     return new Promise((resolve, reject) => {
-      this.server = tcp.createServer()
+      this.server = net.createServer()
 
       this.server.on('connection', (socket: any) => {
         this.handleConnection(socket)

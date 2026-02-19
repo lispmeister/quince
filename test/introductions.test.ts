@@ -1,4 +1,5 @@
-import { test, expect, describe, beforeEach, afterEach } from 'bun:test'
+import { test, describe, beforeEach, afterEach } from 'node:test'
+import assert from 'node:assert'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -88,7 +89,7 @@ afterEach(() => {
 
 describe('introductions CRUD', () => {
   test('empty file returns empty list', () => {
-    expect(loadIntroductions(testDir)).toEqual([])
+    assert.deepStrictEqual(loadIntroductions(testDir), [])
   })
 
   test('add and retrieve introduction', () => {
@@ -103,9 +104,9 @@ describe('introductions CRUD', () => {
     })
 
     const pending = getPendingIntroductions(testDir)
-    expect(pending).toHaveLength(1)
-    expect(pending[0].pubkey).toBe(CAROL_PUBKEY)
-    expect(pending[0].alias).toBe('carol')
+    assert.strictEqual(pending.length, 1)
+    assert.strictEqual(pending[0].pubkey, CAROL_PUBKEY)
+    assert.strictEqual(pending[0].alias, 'carol')
   })
 
   test('get specific introduction by pubkey', () => {
@@ -119,12 +120,12 @@ describe('introductions CRUD', () => {
     })
 
     const intro = getIntroduction(testDir, CAROL_PUBKEY)
-    expect(intro).not.toBeNull()
-    expect(intro!.pubkey).toBe(CAROL_PUBKEY)
+    assert.notStrictEqual(intro, null)
+    assert.strictEqual(intro!.pubkey, CAROL_PUBKEY)
   })
 
   test('returns null for unknown pubkey', () => {
-    expect(getIntroduction(testDir, 'd'.repeat(64))).toBeNull()
+    assert.strictEqual(getIntroduction(testDir, 'd'.repeat(64)), null)
   })
 
   test('accept introduction changes status', () => {
@@ -137,16 +138,16 @@ describe('introductions CRUD', () => {
     })
 
     const accepted = acceptIntroduction(testDir, CAROL_PUBKEY)
-    expect(accepted).not.toBeNull()
-    expect(accepted!.status).toBe('accepted')
+    assert.notStrictEqual(accepted, null)
+    assert.strictEqual(accepted!.status, 'accepted')
 
     // No longer in pending list
-    expect(getPendingIntroductions(testDir)).toHaveLength(0)
+    assert.strictEqual(getPendingIntroductions(testDir).length, 0)
 
     // Still in full list
     const all = loadIntroductions(testDir)
-    expect(all).toHaveLength(1)
-    expect(all[0].status).toBe('accepted')
+    assert.strictEqual(all.length, 1)
+    assert.strictEqual(all[0].status, 'accepted')
   })
 
   test('reject introduction changes status', () => {
@@ -159,18 +160,18 @@ describe('introductions CRUD', () => {
     })
 
     const rejected = rejectIntroduction(testDir, CAROL_PUBKEY)
-    expect(rejected).not.toBeNull()
-    expect(rejected!.status).toBe('rejected')
+    assert.notStrictEqual(rejected, null)
+    assert.strictEqual(rejected!.status, 'rejected')
 
-    expect(getPendingIntroductions(testDir)).toHaveLength(0)
+    assert.strictEqual(getPendingIntroductions(testDir).length, 0)
   })
 
   test('accept returns null for unknown pubkey', () => {
-    expect(acceptIntroduction(testDir, 'd'.repeat(64))).toBeNull()
+    assert.strictEqual(acceptIntroduction(testDir, 'd'.repeat(64)), null)
   })
 
   test('reject returns null for unknown pubkey', () => {
-    expect(rejectIntroduction(testDir, 'd'.repeat(64))).toBeNull()
+    assert.strictEqual(rejectIntroduction(testDir, 'd'.repeat(64)), null)
   })
 
   test('duplicate pending intro replaces previous', () => {
@@ -193,9 +194,9 @@ describe('introductions CRUD', () => {
     })
 
     const pending = getPendingIntroductions(testDir)
-    expect(pending).toHaveLength(1)
-    expect(pending[0].alias).toBe('carol-v2')
-    expect(pending[0].introducerPubkey).toBe(BOB_PUBKEY)
+    assert.strictEqual(pending.length, 1)
+    assert.strictEqual(pending[0].alias, 'carol-v2')
+    assert.strictEqual(pending[0].introducerPubkey, BOB_PUBKEY)
   })
 
   test('multiple pending introductions from different people', () => {
@@ -216,6 +217,6 @@ describe('introductions CRUD', () => {
       status: 'pending'
     })
 
-    expect(getPendingIntroductions(testDir)).toHaveLength(2)
+    assert.strictEqual(getPendingIntroductions(testDir).length, 2)
   })
 })

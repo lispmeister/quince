@@ -1,4 +1,5 @@
-import { test, expect, describe, beforeEach, afterEach } from 'bun:test'
+import { test, describe, beforeEach, afterEach } from 'node:test'
+import assert from 'node:assert'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -139,8 +140,8 @@ describe('enqueue', () => {
   test('writes a JSON file to the queue directory', () => {
     enqueue(testDir, makeMsg())
     const files = fs.readdirSync(testDir).filter(f => f.endsWith('.json'))
-    expect(files).toHaveLength(1)
-    expect(files[0]).toBe('msg-1.json')
+    assert.strictEqual(files.length, 1)
+    assert.strictEqual(files[0], 'msg-1.json')
   })
 
   test('persisted JSON is valid and contains all fields', () => {
@@ -148,51 +149,51 @@ describe('enqueue', () => {
     const onDisk: QueuedMessage = JSON.parse(
       fs.readFileSync(path.join(testDir, 'msg-1.json'), 'utf8'),
     )
-    expect(onDisk.id).toBe('msg-1')
-    expect(onDisk.retryCount).toBe(0)
-    expect(onDisk.createdAt).toBe(queued.createdAt)
-    expect(onDisk.nextRetryAt).toBe(queued.nextRetryAt)
-    expect(onDisk.recipientPubkey).toBe(PUBKEY)
+    assert.strictEqual(onDisk.id, 'msg-1')
+    assert.strictEqual(onDisk.retryCount, 0)
+    assert.strictEqual(onDisk.createdAt, queued.createdAt)
+    assert.strictEqual(onDisk.nextRetryAt, queued.nextRetryAt)
+    assert.strictEqual(onDisk.recipientPubkey, PUBKEY)
   })
 
   test('nextRetryAt = createdAt + initialRetryDelayMs', () => {
     const queued = enqueue(testDir, makeMsg(), { ...DEFAULT_CONFIG, initialRetryDelayMs: 5000 })
-    expect(queued.nextRetryAt).toBe(queued.createdAt + 5000)
+    assert.strictEqual(queued.nextRetryAt, queued.createdAt + 5000)
   })
 
   test('multiple messages create separate files', () => {
     enqueue(testDir, makeMsg('msg-a'))
     enqueue(testDir, makeMsg('msg-b'))
     const files = fs.readdirSync(testDir).filter(f => f.endsWith('.json'))
-    expect(files).toHaveLength(2)
+    assert.strictEqual(files.length, 2)
   })
 })
 
 describe('loadQueue', () => {
   test('returns empty array for empty directory', () => {
-    expect(loadQueue(testDir)).toHaveLength(0)
+    assert.strictEqual(loadQueue(testDir).length, 0)
   })
 
   test('returns all enqueued messages', () => {
     enqueue(testDir, makeMsg('a'))
     enqueue(testDir, makeMsg('b'))
     const msgs = loadQueue(testDir)
-    expect(msgs).toHaveLength(2)
+    assert.strictEqual(msgs.length, 2)
     const ids = msgs.map(m => m.id).sort()
-    expect(ids).toEqual(['a', 'b'])
+    assert.deepStrictEqual(ids, ['a', 'b'])
   })
 
   test('persistence: load in a second call sees previously enqueued message', () => {
     enqueue(testDir, makeMsg('persist-me'))
     // Simulate restart: a fresh call to loadQueue reads from disk
     const msgs = loadQueue(testDir)
-    expect(msgs.find(m => m.id === 'persist-me')).toBeDefined()
+    assert.notStrictEqual(msgs.find(m => m.id === 'persist-me'), undefined)
   })
 
   test('ignores non-json files in queue directory', () => {
     fs.writeFileSync(path.join(testDir, 'README.txt'), 'ignore me')
     enqueue(testDir, makeMsg())
-    expect(loadQueue(testDir)).toHaveLength(1)
+    assert.strictEqual(loadQueue(testDir).length, 1)
   })
 })
 
@@ -200,46 +201,46 @@ describe('removeFromQueue', () => {
   test('removes the JSON file', () => {
     enqueue(testDir, makeMsg())
     removeFromQueue(testDir, 'msg-1')
-    expect(fs.existsSync(path.join(testDir, 'msg-1.json'))).toBe(false)
+    assert.strictEqual(fs.existsSync(path.join(testDir, 'msg-1.json')), false)
   })
 
   test('returns true when file existed', () => {
     enqueue(testDir, makeMsg())
-    expect(removeFromQueue(testDir, 'msg-1')).toBe(true)
+    assert.strictEqual(removeFromQueue(testDir, 'msg-1'), true)
   })
 
   test('returns false when file did not exist', () => {
-    expect(removeFromQueue(testDir, 'nonexistent')).toBe(false)
+    assert.strictEqual(removeFromQueue(testDir, 'nonexistent'), false)
   })
 
   test('does not affect other messages', () => {
     enqueue(testDir, makeMsg('keep'))
     enqueue(testDir, makeMsg('remove'))
     removeFromQueue(testDir, 'remove')
-    expect(loadQueue(testDir)).toHaveLength(1)
-    expect(loadQueue(testDir)[0]!.id).toBe('keep')
+    assert.strictEqual(loadQueue(testDir).length, 1)
+    assert.strictEqual(loadQueue(testDir)[0]!.id, 'keep')
   })
 })
 
 describe('backoff calculation', () => {
   test('first retry delay = initialRetryDelayMs * 2^1', () => {
     // retryCount is incremented before calling markRetry; after first retry retryCount = 1
-    expect(calcBackoff(1, { ...DEFAULT_CONFIG, initialRetryDelayMs: 1000 })).toBe(2000)
+    assert.strictEqual(calcBackoff(1, { ...DEFAULT_CONFIG, initialRetryDelayMs: 1000 }), 2000)
   })
 
   test('second retry delay = initialRetryDelayMs * 2^2', () => {
-    expect(calcBackoff(2, { ...DEFAULT_CONFIG, initialRetryDelayMs: 1000 })).toBe(4000)
+    assert.strictEqual(calcBackoff(2, { ...DEFAULT_CONFIG, initialRetryDelayMs: 1000 }), 4000)
   })
 
   test('delay grows exponentially', () => {
     const delays = [1, 2, 3, 4].map(n => calcBackoff(n, { ...DEFAULT_CONFIG, initialRetryDelayMs: 1000 }))
-    expect(delays).toEqual([2000, 4000, 8000, 16000])
+    assert.deepStrictEqual(delays, [2000, 4000, 8000, 16000])
   })
 
   test('delay is capped at maxRetryDelayMs', () => {
     const config = { initialRetryDelayMs: 1000, maxRetryDelayMs: 5000, maxRetries: 50 }
     // After enough doublings it would exceed 5000
-    expect(calcBackoff(10, config)).toBe(5000)
+    assert.strictEqual(calcBackoff(10, config), 5000)
   })
 
   test('markRetry updates nextRetryAt with exponential delay', () => {
@@ -247,12 +248,12 @@ describe('backoff calculation', () => {
     const before = Date.now()
     const result = markRetry(testDir, 'msg-1', { ...DEFAULT_CONFIG, initialRetryDelayMs: 1000 })
     const after = Date.now()
-    expect(result).not.toBeNull()
-    expect(result).not.toBe('expired')
+    assert.notStrictEqual(result, null)
+    assert.notStrictEqual(result, 'expired')
     const updated = result as QueuedMessage
     // After first markRetry, retryCount = 1, delay = 1000 * 2^1 = 2000
-    expect(updated.nextRetryAt).toBeGreaterThanOrEqual(before + 2000)
-    expect(updated.nextRetryAt).toBeLessThanOrEqual(after + 2000)
+    assert.ok(updated.nextRetryAt >= before + 2000)
+    assert.ok(updated.nextRetryAt <= after + 2000)
   })
 
   test('markRetry delay doubles on consecutive calls', () => {
@@ -260,7 +261,7 @@ describe('backoff calculation', () => {
     const r1 = markRetry(testDir, 'msg-1') as QueuedMessage
     const r2 = markRetry(testDir, 'msg-1') as QueuedMessage
     // delay for retry 2 (2^2=4000) > delay for retry 1 (2^1=2000)
-    expect(r2.nextRetryAt).toBeGreaterThan(r1.nextRetryAt)
+    assert.ok(r2.nextRetryAt > r1.nextRetryAt)
   })
 })
 
@@ -272,18 +273,18 @@ describe('getDueMessages', () => {
     fs.writeFileSync(path.join(testDir, 'due.json'), JSON.stringify(queued))
 
     const due = getDueMessages(testDir)
-    expect(due.find(m => m.id === 'due')).toBeDefined()
+    assert.notStrictEqual(due.find(m => m.id === 'due'), undefined)
   })
 
   test('does not return messages with nextRetryAt in the future', () => {
     enqueue(testDir, makeMsg('future'), { ...DEFAULT_CONFIG, initialRetryDelayMs: 60_000 })
     const due = getDueMessages(testDir)
-    expect(due.find(m => m.id === 'future')).toBeUndefined()
+    assert.strictEqual(due.find(m => m.id === 'future'), undefined)
   })
 
   test('returns empty array when no messages are due', () => {
     enqueue(testDir, makeMsg(), { ...DEFAULT_CONFIG, initialRetryDelayMs: 60_000 })
-    expect(getDueMessages(testDir)).toHaveLength(0)
+    assert.strictEqual(getDueMessages(testDir).length, 0)
   })
 
   test('orders due messages by nextRetryAt ascending', () => {
@@ -293,7 +294,7 @@ describe('getDueMessages', () => {
       fs.writeFileSync(path.join(testDir, `${id}.json`), JSON.stringify(m))
     }
     const due = getDueMessages(testDir, Date.now())
-    expect(due.map(m => m.id)).toEqual(['a', 'b', 'c'])
+    assert.deepStrictEqual(due.map(m => m.id), ['a', 'b', 'c'])
   })
 })
 
@@ -304,18 +305,18 @@ describe('markRetry — expiry', () => {
     markRetry(testDir, 'msg-1', { ...DEFAULT_CONFIG, maxRetries: 3 })  // retryCount = 1
     markRetry(testDir, 'msg-1', { ...DEFAULT_CONFIG, maxRetries: 3 })  // retryCount = 2
     const result = markRetry(testDir, 'msg-1', { ...DEFAULT_CONFIG, maxRetries: 3 })  // retryCount = 3 → expired
-    expect(result).toBe('expired')
-    expect(fs.existsSync(path.join(testDir, 'msg-1.json'))).toBe(false)
+    assert.strictEqual(result, 'expired')
+    assert.strictEqual(fs.existsSync(path.join(testDir, 'msg-1.json')), false)
   })
 
   test('returns null for a message that does not exist', () => {
-    expect(markRetry(testDir, 'ghost')).toBeNull()
+    assert.strictEqual(markRetry(testDir, 'ghost'), null)
   })
 
   test('message survives retries below maxRetries threshold', () => {
     enqueue(testDir, makeMsg(), { ...DEFAULT_CONFIG, maxRetries: 5 })
     markRetry(testDir, 'msg-1', { ...DEFAULT_CONFIG, maxRetries: 5 })
     markRetry(testDir, 'msg-1', { ...DEFAULT_CONFIG, maxRetries: 5 })
-    expect(fs.existsSync(path.join(testDir, 'msg-1.json'))).toBe(true)
+    assert.strictEqual(fs.existsSync(path.join(testDir, 'msg-1.json')), true)
   })
 })

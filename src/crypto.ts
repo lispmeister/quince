@@ -1,5 +1,4 @@
 import crypto from 'hypercore-crypto'
-import b4a from 'b4a'
 
 const SIGNATURE_HEADER = 'X-Quince-Signature'
 
@@ -14,7 +13,7 @@ function splitHeadersAndBody(mime: string): { headers: string; body: string } | 
 }
 
 function hashBody(body: string): Buffer {
-  return crypto.hash(b4a.from(body, 'utf8'))
+  return crypto.hash(Buffer.from(body, 'utf8'))
 }
 
 /**
@@ -26,8 +25,8 @@ export function signMessage(mime: string, secretKey: string): string {
   if (!parts) return mime  // malformed MIME, pass through unsigned
 
   const hash = hashBody(parts.body)
-  const sig = crypto.sign(hash, b4a.from(secretKey, 'hex'))
-  const sigHex = b4a.toString(sig, 'hex')
+  const sig = crypto.sign(hash, Buffer.from(secretKey, 'hex'))
+  const sigHex = sig.toString('hex')
 
   return `${parts.headers}\r\n${SIGNATURE_HEADER}: ${sigHex}\r\n\r\n${parts.body}`
 }
@@ -50,8 +49,8 @@ export function verifyMessage(mime: string, senderPubkey: string): { mime: strin
   if (!/^[a-f0-9]{128}$/i.test(sigHex)) return { mime, valid: false }
 
   const hash = hashBody(parts.body)
-  const sig = b4a.from(sigHex, 'hex')
-  const pubkey = b4a.from(senderPubkey, 'hex')
+  const sig = Buffer.from(sigHex, 'hex')
+  const pubkey = Buffer.from(senderPubkey, 'hex')
   const valid = crypto.verify(hash, sig, pubkey)
 
   return { mime, valid }
@@ -63,9 +62,9 @@ export function verifyMessage(mime: string, senderPubkey: string): { mime: strin
  */
 export function signIntroduction(introduced: Record<string, unknown>, secretKey: string): string {
   const data = JSON.stringify(introduced)
-  const hash = crypto.hash(b4a.from(data, 'utf8'))
-  const sig = crypto.sign(hash, b4a.from(secretKey, 'hex'))
-  return b4a.toString(sig, 'hex')
+  const hash = crypto.hash(Buffer.from(data, 'utf8'))
+  const sig = crypto.sign(hash, Buffer.from(secretKey, 'hex'))
+  return sig.toString('hex')
 }
 
 /**
@@ -74,8 +73,8 @@ export function signIntroduction(introduced: Record<string, unknown>, secretKey:
 export function verifyIntroduction(introduced: Record<string, unknown>, signature: string, introducerPubkey: string): boolean {
   if (!/^[a-f0-9]{128}$/i.test(signature)) return false
   const data = JSON.stringify(introduced)
-  const hash = crypto.hash(b4a.from(data, 'utf8'))
-  const sig = b4a.from(signature, 'hex')
-  const pubkey = b4a.from(introducerPubkey, 'hex')
+  const hash = crypto.hash(Buffer.from(data, 'utf8'))
+  const sig = Buffer.from(signature, 'hex')
+  const pubkey = Buffer.from(introducerPubkey, 'hex')
   return crypto.verify(hash, sig, pubkey)
 }

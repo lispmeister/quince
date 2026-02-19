@@ -1,11 +1,10 @@
-import { EventEmitter } from 'bare-events'
+import { EventEmitter } from 'events'
 import Hyperswarm from 'hyperswarm'
 import Corestore from 'corestore'
 import Hyperdrive from 'hyperdrive'
-import fs from 'bare-fs'
-import path from 'bare-path'
-import os from 'bare-os'
-import b4a from 'b4a'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
 import crypto from 'hypercore-crypto'
 import type { PeerFileOffer } from '../transport/types.js'
 import type { FileTransfer, TransferState } from './types.js'
@@ -122,7 +121,7 @@ export class FileTransferManager extends EventEmitter {
     const drive = new Hyperdrive(ns)
     await drive.ready()
 
-    const keyHex = b4a.toString(drive.key, 'hex')
+    const keyHex = Buffer.from(drive.key).toString('hex')
     this.drives.set(keyHex, drive)
     this.peerDrives.set(peerPubkey, drive)
 
@@ -138,7 +137,7 @@ export class FileTransferManager extends EventEmitter {
     const existing = this.drives.get(driveKeyHex)
     if (existing) return existing
 
-    const driveKey = b4a.from(driveKeyHex, 'hex')
+    const driveKey = Buffer.from(driveKeyHex, 'hex')
     const drive = new Hyperdrive(this.store!, driveKey)
     await drive.ready()
 
@@ -162,7 +161,7 @@ export class FileTransferManager extends EventEmitter {
     refs: Array<{ name: string }>
   ): Promise<PeerFileOffer> {
     const drive = await this.getOrCreateDrive(peerPubkey)
-    const driveKeyHex = b4a.toString(drive.key, 'hex')
+    const driveKeyHex = Buffer.from(drive.key).toString('hex')
     const mediaDir = getMediaDir()
 
     const files: PeerFileOffer['files'] = []
@@ -178,7 +177,7 @@ export class FileTransferManager extends EventEmitter {
 
       await drive.put(drivePath, data)
 
-      const hash = b4a.toString(crypto.hash(data), 'hex')
+      const hash = Buffer.from(crypto.hash(data)).toString('hex')
       files.push({
         name: ref.name,
         path: drivePath,
@@ -188,7 +187,7 @@ export class FileTransferManager extends EventEmitter {
     }
 
     const transfer: FileTransfer = {
-      id: b4a.toString(crypto.randomBytes(16), 'hex'),
+      id: Buffer.from(crypto.randomBytes(16)).toString('hex'),
       messageId,
       peer: peerPubkey,
       direction: 'send',
@@ -219,7 +218,7 @@ export class FileTransferManager extends EventEmitter {
     ensureMediaDirs(senderPubkey)
 
     const transfer: FileTransfer = {
-      id: b4a.toString(crypto.randomBytes(16), 'hex'),
+      id: Buffer.from(crypto.randomBytes(16)).toString('hex'),
       messageId: offer.messageId,
       peer: senderPubkey,
       direction: 'receive',
@@ -255,7 +254,7 @@ export class FileTransferManager extends EventEmitter {
           }
 
           // Verify hash
-          const actualHash = b4a.toString(crypto.hash(data), 'hex')
+          const actualHash = Buffer.from(crypto.hash(data)).toString('hex')
           if (actualHash !== file.hash) {
             console.error(`Hash mismatch for ${file.name}: expected ${file.hash.slice(0, 16)}..., got ${actualHash.slice(0, 16)}...`)
             allOk = false

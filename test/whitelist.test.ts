@@ -1,4 +1,5 @@
-import { test, expect, describe, beforeEach, afterEach } from 'bun:test'
+import { test, describe, beforeEach, afterEach } from 'node:test'
+import assert from 'node:assert'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -128,26 +129,26 @@ function removeRule(id: string): boolean {
 describe('whitelist CRUD', () => {
   test('addRule and listRules', () => {
     const rule = addRule('address', 'noreply@github.com')
-    expect(rule.type).toBe('address')
-    expect(rule.value).toBe('noreply@github.com')
-    expect(rule.id).toBeTruthy()
+    assert.strictEqual(rule.type, 'address')
+    assert.strictEqual(rule.value, 'noreply@github.com')
+    assert.ok(rule.id)
 
     const rules = loadRules()
-    expect(rules.length).toBe(1)
-    expect(rules[0]!.value).toBe('noreply@github.com')
+    assert.strictEqual(rules.length, 1)
+    assert.strictEqual(rules[0]!.value, 'noreply@github.com')
   })
 
   test('removeRule', () => {
     const rule = addRule('domain', '*.bank.com')
-    expect(loadRules().length).toBe(1)
+    assert.strictEqual(loadRules().length, 1)
 
     const removed = removeRule(rule.id)
-    expect(removed).toBe(true)
-    expect(loadRules().length).toBe(0)
+    assert.strictEqual(removed, true)
+    assert.strictEqual(loadRules().length, 0)
   })
 
   test('removeRule returns false for unknown id', () => {
-    expect(removeRule('nonexistent')).toBe(false)
+    assert.strictEqual(removeRule('nonexistent'), false)
   })
 })
 
@@ -158,50 +159,50 @@ describe('matchesWhitelist', () => {
     const rules: WhitelistRule[] = [
       { id: '1', type: 'address', value: 'noreply@github.com', createdAt: 0 }
     ]
-    expect(matchesWhitelist('noreply@github.com', headers, rules)).toBe(true)
+    assert.strictEqual(matchesWhitelist('noreply@github.com', headers, rules), true)
   })
 
   test('address case insensitivity', () => {
     const rules: WhitelistRule[] = [
       { id: '1', type: 'address', value: 'NoReply@GitHub.com', createdAt: 0 }
     ]
-    expect(matchesWhitelist('noreply@github.com', headers, rules)).toBe(true)
-    expect(matchesWhitelist('NOREPLY@GITHUB.COM', headers, rules)).toBe(true)
+    assert.strictEqual(matchesWhitelist('noreply@github.com', headers, rules), true)
+    assert.strictEqual(matchesWhitelist('NOREPLY@GITHUB.COM', headers, rules), true)
   })
 
   test('address no match', () => {
     const rules: WhitelistRule[] = [
       { id: '1', type: 'address', value: 'noreply@github.com', createdAt: 0 }
     ]
-    expect(matchesWhitelist('other@github.com', headers, rules)).toBe(false)
+    assert.strictEqual(matchesWhitelist('other@github.com', headers, rules), false)
   })
 
   test('domain exact match', () => {
     const rules: WhitelistRule[] = [
       { id: '1', type: 'domain', value: 'github.com', createdAt: 0 }
     ]
-    expect(matchesWhitelist('noreply@github.com', headers, rules)).toBe(true)
+    assert.strictEqual(matchesWhitelist('noreply@github.com', headers, rules), true)
   })
 
   test('domain wildcard matches base domain', () => {
     const rules: WhitelistRule[] = [
       { id: '1', type: 'domain', value: '*.github.com', createdAt: 0 }
     ]
-    expect(matchesWhitelist('a@github.com', headers, rules)).toBe(true)
+    assert.strictEqual(matchesWhitelist('a@github.com', headers, rules), true)
   })
 
   test('domain wildcard matches subdomain', () => {
     const rules: WhitelistRule[] = [
       { id: '1', type: 'domain', value: '*.github.com', createdAt: 0 }
     ]
-    expect(matchesWhitelist('a@sub.github.com', headers, rules)).toBe(true)
+    assert.strictEqual(matchesWhitelist('a@sub.github.com', headers, rules), true)
   })
 
   test('domain wildcard does not match unrelated', () => {
     const rules: WhitelistRule[] = [
       { id: '1', type: 'domain', value: '*.bank.com', createdAt: 0 }
     ]
-    expect(matchesWhitelist('a@notbank.com', headers, rules)).toBe(false)
+    assert.strictEqual(matchesWhitelist('a@notbank.com', headers, rules), false)
   })
 
   test('listId match from List-ID header', () => {
@@ -209,7 +210,7 @@ describe('matchesWhitelist', () => {
     const rules: WhitelistRule[] = [
       { id: '1', type: 'listId', value: 'dev-updates.github.com', createdAt: 0 }
     ]
-    expect(matchesWhitelist('bot@github.com', hdrs, rules)).toBe(true)
+    assert.strictEqual(matchesWhitelist('bot@github.com', hdrs, rules), true)
   })
 
   test('listId match from List-Id header (alternate casing)', () => {
@@ -217,7 +218,7 @@ describe('matchesWhitelist', () => {
     const rules: WhitelistRule[] = [
       { id: '1', type: 'listId', value: 'dev-updates.github.com', createdAt: 0 }
     ]
-    expect(matchesWhitelist('bot@github.com', hdrs, rules)).toBe(true)
+    assert.strictEqual(matchesWhitelist('bot@github.com', hdrs, rules), true)
   })
 
   test('listId no match', () => {
@@ -225,10 +226,10 @@ describe('matchesWhitelist', () => {
     const rules: WhitelistRule[] = [
       { id: '1', type: 'listId', value: 'dev-updates.github.com', createdAt: 0 }
     ]
-    expect(matchesWhitelist('bot@github.com', hdrs, rules)).toBe(false)
+    assert.strictEqual(matchesWhitelist('bot@github.com', hdrs, rules), false)
   })
 
   test('no rules returns false', () => {
-    expect(matchesWhitelist('anyone@example.com', headers, [])).toBe(false)
+    assert.strictEqual(matchesWhitelist('anyone@example.com', headers, []), false)
   })
 })

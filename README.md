@@ -20,26 +20,39 @@ Start two daemons, exchange public keys, done.
 
 ### 1. Install and build
 
+**Requirements:** Node.js 22+
+
 ```bash
-bun install
-bun run build
-bun link
+npm install
+npm run build
+npm link
 ```
 
-### 2. Start the daemon
+### 2. Initialize (first run only)
+
+```bash
+quince init
+```
+
+This generates an Ed25519 keypair at `~/.quince/id` and prints your identity:
+
+```
+Public key: b56b17b7a1c3d4e5...
+Email: user@b56b17b7...quincemail.com
+```
+
+### 3. Start the daemon
 
 ```bash
 quince start
 ```
 
-First run generates an Ed25519 keypair at `~/.quince/id` and prints your public key:
+The daemon listens on:
+- HTTP API: `127.0.0.1:2580`
+- SMTP: `127.0.0.1:2525`
+- POP3: `127.0.0.1:1110`
 
-```
-Public key: b56b17b7a1c3d4e5...
-HTTP: 127.0.0.1:2580
-```
-
-### 3. Add a peer
+### 4. Add a peer
 
 Both sides must add each other (mutual whitelist). Share your public key out-of-band, then:
 
@@ -49,7 +62,7 @@ quince add-peer bob <bobs-64-char-hex-pubkey>
 
 Bob does the same with your key.
 
-### 4. Send a message
+### 5. Send a message
 
 ```bash
 curl -X POST http://localhost:2580/api/send \
@@ -65,7 +78,7 @@ Response:
 
 If the peer is offline, the message is queued and retried automatically (`"queued": true`).
 
-### 5. Read your inbox
+### 6. Read your inbox
 
 ```bash
 curl http://localhost:2580/api/inbox
@@ -84,6 +97,55 @@ curl http://localhost:2580/api/inbox
   "total": 1
 }
 ```
+
+## OpenClaw Integration
+
+Quince integrates seamlessly with [OpenClaw](https://docs.openclaw.ai), an AI agent platform. Install the quince skill for zero-config email:
+
+```bash
+clawhub install quince
+```
+
+This will:
+1. Install quince globally via npm
+2. Generate an Ed25519 identity
+3. Register your username on quincemail.com
+4. Auto-start the daemon on first use
+
+### OpenClaw Agent Usage
+
+The OpenClaw agent can use quince immediately via curl:
+
+```bash
+# Check daemon health
+curl -sf http://localhost:2580/api/identity || quince start &
+
+# Send a message
+curl -X POST http://localhost:2580/api/send \
+  -H 'Content-Type: application/json' \
+  -d '{"to": "user@peer.quincemail.com", "subject": "Hello", "body": "Message"}'
+
+# Check inbox
+curl http://localhost:2580/api/inbox
+```
+
+### Peer Discovery
+
+Look up other quince users by username:
+
+```bash
+curl https://quincemail.com/api/directory/lookup?username=<name>
+```
+
+Add discovered peers automatically:
+
+```bash
+curl -X POST http://localhost:2580/api/peers \
+  -H 'Content-Type: application/json' \
+  -d '{"alias": "<name>", "pubkey": "<pubkey>"}'
+```
+
+See [skill/README.md](skill/README.md) for full OpenClaw skill documentation.
 
 ## HTTP API Reference
 
@@ -224,6 +286,33 @@ curl -X POST http://localhost:2580/api/introductions/<charlies-pubkey>/accept
 
 This adds charlie to bob's whitelist and initiates a connection.
 
+### Gate (Paid Email)
+
+Paid messages from the public internet land here for agent triage.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/gate` | List paid messages pending review |
+| `GET` | `/api/gate/:id` | Get a specific gate message |
+| `POST` | `/api/gate/:id/accept` | Accept message, sender added to whitelist |
+| `POST` | `/api/gate/:id/reject` | Reject message |
+| `GET` | `/api/gate/rules` | List gate filter rules |
+| `POST` | `/api/gate/rules` | Add a gate rule |
+| `PUT` | `/api/gate/rules/:id` | Update a gate rule |
+| `DELETE` | `/api/gate/rules/:id` | Delete a gate rule |
+
+**Gate rules** filter incoming paid email:
+
+```bash
+# List all rules
+curl http://localhost:2580/api/gate/rules
+
+# Add an accept rule
+curl -X POST http://localhost:2580/api/gate/rules \
+  -H 'Content-Type: application/json' \
+  -d '{"action": "accept", "conditions": {"fromDomain": "*.edu"}}'
+```
+
 ### Transfers
 
 | Method | Endpoint | Description |
@@ -290,6 +379,13 @@ Peers must mutually whitelist each other before messages flow. There are two way
 **Direct key exchange** — share public keys out-of-band and `add-peer` on both sides.
 
 **Introductions** — a trusted peer vouches for a third party. The introduction is cryptographically signed by the introducer. The recipient can accept or reject.
+
+**Directory lookup** — find peers by username via quincemail.com:
+
+```bash
+curl https://quincemail.com/api/directory/lookup?username=bob
+# Response: {"pubkey": "b0b5...", "username": "bob", "registeredAt": 1706000000000}
+```
 
 ### Auto-accepting introductions
 
@@ -371,7 +467,15 @@ Quince stores configuration in `~/.quince/config.json`:
   },
   "trustIntroductions": {
     "bob": true
-  }
+  },
+  "directory": {
+    "url": "https://quincemail.com",
+    "autoLookup": true,
+    "listed": true
+  },
+  "gateRules": [
+    {"action": "accept", "conditions": {"fromDomain": "*.edu"}}
+  ]
 }
 ```
 
@@ -383,11 +487,16 @@ Quince stores configuration in `~/.quince/config.json`:
 | `httpPort` | `2580` | HTTP API port |
 | `peers` | `{}` | Map of aliases to 64-char hex public keys |
 | `trustIntroductions` | `{}` | Map of aliases to boolean — auto-accept introductions from these peers |
+| `directory.url` | `https://quincemail.com` | Directory service URL |
+| `directory.autoLookup` | `true` | Auto-resolve unknown usernames via directory |
+| `directory.listed` | `true` | Include this daemon in the public directory |
+| `gateRules` | `[]` | Filter rules for paid email gate |
 
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
+| `quince init` | Initialize identity and config (no daemon) |
 | `quince start` | Start the daemon |
 | `quince identity` | Show your public key and email address |
 | `quince peers` | List configured peers |
@@ -396,7 +505,7 @@ Quince stores configuration in `~/.quince/config.json`:
 | `quince config` | Show current configuration |
 | `quince inbox` | List received messages |
 | `quince queue` | Show queued messages |
-| `quince queue clear` | Clear the message queue |
+| `quince queue clear` | Clear all queued messages |
 | `quince transfers` | Show active file transfers |
 | `quince transfers --all` | Show all transfers including completed |
 | `quince introductions` | List pending introductions |
@@ -436,7 +545,7 @@ Override config file settings:
 ### Unit tests
 
 ```bash
-bun run test
+npm test
 ```
 
 ### Integration tests

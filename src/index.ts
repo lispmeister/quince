@@ -1,8 +1,7 @@
-import process from 'bare-process'
-import env from 'bare-env'
-import fs from 'bare-fs'
-import path from 'bare-path'
-import os from 'bare-os'
+import process from 'process'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
 import { SmtpServer } from './smtp/index.js'
 import { Transport } from './transport/index.js'
 import type { PeerMessage } from './transport/index.js'
@@ -56,12 +55,12 @@ import { lookupUsername } from './directory.js'
 let config = loadConfig()
 const identity = loadIdentity()
 
-const PORT = parseInt(env.SMTP_PORT ?? String(config.smtpPort ?? 2525), 10)
-const POP3_PORT = parseInt(env.POP3_PORT ?? String(config.pop3Port ?? 1110), 10)
-const HTTP_PORT = parseInt(env.HTTP_PORT ?? String(config.httpPort ?? 2580), 10)
-const BIND_ADDR = env.BIND_ADDR ?? '127.0.0.1'
-const HOSTNAME = env.HOSTNAME ?? 'quince.local'
-const LOCAL_USER = env.LOCAL_USER ?? config.username ?? 'user'
+const PORT = parseInt(process.env.SMTP_PORT ?? String(config.smtpPort ?? 2525), 10)
+const POP3_PORT = parseInt(process.env.POP3_PORT ?? String(config.pop3Port ?? 1110), 10)
+const HTTP_PORT = parseInt(process.env.HTTP_PORT ?? String(config.httpPort ?? 2580), 10)
+const BIND_ADDR = process.env.BIND_ADDR ?? '127.0.0.1'
+const HOSTNAME = process.env.HOSTNAME ?? 'quince.local'
+const LOCAL_USER = process.env.LOCAL_USER ?? config.username ?? 'user'
 
 function printUsage(): void {
   const emailAddr = getEmailAddress(LOCAL_USER, identity.publicKey)

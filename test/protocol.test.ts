@@ -1,4 +1,5 @@
-import { test, expect, describe } from 'bun:test'
+import { test, describe } from 'node:test'
+import assert from 'node:assert'
 import type {
   PeerPacket,
   PeerMessage,
@@ -10,7 +11,7 @@ import type {
   PeerFileRequest,
   PeerFileComplete,
   PeerCapabilities,
-} from '../src/transport/types.js'
+} from '../dist/transport/types.js'
 
 // These tests validate packet construction, required-field presence, and
 // JSON round-trip behaviour.  No network or Hyperswarm code is involved.
@@ -37,34 +38,34 @@ describe('PeerMessage', () => {
   const valid: PeerMessage = { type: 'MESSAGE', id: MSG_ID, from: PUBKEY, mime: MIME_B64 }
 
   test('valid MESSAGE has correct type literal', () => {
-    expect(valid.type).toBe('MESSAGE')
+    assert.strictEqual(valid.type, 'MESSAGE')
   })
 
   test('valid MESSAGE has id, from, mime', () => {
-    expect(hasRequiredFields(valid as unknown as Record<string, unknown>, ['type', 'id', 'from', 'mime'])).toBe(true)
+    assert.strictEqual(hasRequiredFields(valid as unknown as Record<string, unknown>, ['type', 'id', 'from', 'mime']), true)
   })
 
   test('JSON round-trip preserves all fields', () => {
     const rt = roundTrip(valid)
-    expect(rt.type).toBe('MESSAGE')
-    expect(rt.id).toBe(MSG_ID)
-    expect(rt.from).toBe(PUBKEY)
-    expect(rt.mime).toBe(MIME_B64)
+    assert.strictEqual(rt.type, 'MESSAGE')
+    assert.strictEqual(rt.id, MSG_ID)
+    assert.strictEqual(rt.from, PUBKEY)
+    assert.strictEqual(rt.mime, MIME_B64)
   })
 
   test('missing id fails field check', () => {
     const bad = { type: 'MESSAGE', from: PUBKEY, mime: MIME_B64 }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'id', 'from', 'mime'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'id', 'from', 'mime']), false)
   })
 
   test('missing from fails field check', () => {
     const bad = { type: 'MESSAGE', id: MSG_ID, mime: MIME_B64 }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'id', 'from', 'mime'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'id', 'from', 'mime']), false)
   })
 
   test('missing mime fails field check', () => {
     const bad = { type: 'MESSAGE', id: MSG_ID, from: PUBKEY }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'id', 'from', 'mime'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'id', 'from', 'mime']), false)
   })
 })
 
@@ -74,22 +75,22 @@ describe('PeerAck', () => {
   const valid: PeerAck = { type: 'ACK', id: MSG_ID }
 
   test('valid ACK has correct type literal', () => {
-    expect(valid.type).toBe('ACK')
+    assert.strictEqual(valid.type, 'ACK')
   })
 
   test('valid ACK has id field', () => {
-    expect(hasRequiredFields(valid as unknown as Record<string, unknown>, ['type', 'id'])).toBe(true)
+    assert.strictEqual(hasRequiredFields(valid as unknown as Record<string, unknown>, ['type', 'id']), true)
   })
 
   test('JSON round-trip preserves all fields', () => {
     const rt = roundTrip(valid)
-    expect(rt.type).toBe('ACK')
-    expect(rt.id).toBe(MSG_ID)
+    assert.strictEqual(rt.type, 'ACK')
+    assert.strictEqual(rt.id, MSG_ID)
   })
 
   test('missing id fails field check', () => {
     const bad = { type: 'ACK' }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'id'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'id']), false)
   })
 })
 
@@ -110,38 +111,38 @@ describe('PeerIdentify', () => {
   }
 
   test('valid IDENTIFY has correct type literal', () => {
-    expect(minimal.type).toBe('IDENTIFY')
+    assert.strictEqual(minimal.type, 'IDENTIFY')
   })
 
   test('valid IDENTIFY has publicKey', () => {
-    expect(hasRequiredFields(minimal as unknown as Record<string, unknown>, ['type', 'publicKey'])).toBe(true)
+    assert.strictEqual(hasRequiredFields(minimal as unknown as Record<string, unknown>, ['type', 'publicKey']), true)
   })
 
   test('JSON round-trip (minimal)', () => {
     const rt = roundTrip(minimal)
-    expect(rt.type).toBe('IDENTIFY')
-    expect(rt.publicKey).toBe(PUBKEY)
-    expect(rt.capabilities).toBeUndefined()
+    assert.strictEqual(rt.type, 'IDENTIFY')
+    assert.strictEqual(rt.publicKey, PUBKEY)
+    assert.strictEqual(rt.capabilities, undefined)
   })
 
   test('JSON round-trip with capabilities', () => {
     const rt = roundTrip(withCaps)
-    expect(rt.capabilities!.name).toBe('quince')
-    expect(rt.capabilities!.version).toBe('1.0.0')
-    expect(rt.capabilities!.accepts).toEqual(['text/plain', 'text/html'])
-    expect(rt.capabilities!.maxFileSize).toBe(10_000_000)
+    assert.strictEqual(rt.capabilities!.name, 'quince')
+    assert.strictEqual(rt.capabilities!.version, '1.0.0')
+    assert.deepStrictEqual(rt.capabilities!.accepts, ['text/plain', 'text/html'])
+    assert.strictEqual(rt.capabilities!.maxFileSize, 10_000_000)
   })
 
   test('capabilities fields are all optional', () => {
     const minimal_caps: PeerCapabilities = {}
     const pkt: PeerIdentify = { type: 'IDENTIFY', publicKey: PUBKEY, capabilities: minimal_caps }
     const rt = roundTrip(pkt)
-    expect(rt.capabilities).toEqual({})
+    assert.deepStrictEqual(rt.capabilities, {})
   })
 
   test('missing publicKey fails field check', () => {
     const bad = { type: 'IDENTIFY' }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'publicKey'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'publicKey']), false)
   })
 })
 
@@ -153,35 +154,35 @@ describe('PeerStatus', () => {
   for (const status of statuses) {
     test(`valid STATUS with status="${status}"`, () => {
       const pkt: PeerStatus = { type: 'STATUS', status }
-      expect(pkt.type).toBe('STATUS')
-      expect(pkt.status).toBe(status)
+      assert.strictEqual(pkt.type, 'STATUS')
+      assert.strictEqual(pkt.status, status)
     })
 
     test(`JSON round-trip for STATUS "${status}"`, () => {
       const pkt: PeerStatus = { type: 'STATUS', status, message: 'In a meeting' }
       const rt = roundTrip(pkt)
-      expect(rt.type).toBe('STATUS')
-      expect(rt.status).toBe(status)
-      expect(rt.message).toBe('In a meeting')
+      assert.strictEqual(rt.type, 'STATUS')
+      assert.strictEqual(rt.status, status)
+      assert.strictEqual(rt.message, 'In a meeting')
     })
   }
 
   test('optional message field survives round-trip when absent', () => {
     const pkt: PeerStatus = { type: 'STATUS', status: 'available' }
     const rt = roundTrip(pkt)
-    expect(rt.message).toBeUndefined()
+    assert.strictEqual(rt.message, undefined)
   })
 
   test('status field rejects invalid value at runtime guard level', () => {
     // TypeScript won't allow other strings, but we test the value constraint
     const validStatuses = ['available', 'busy', 'away']
     const bad = { type: 'STATUS', status: 'online' }
-    expect(validStatuses.includes((bad as Record<string, string>).status)).toBe(false)
+    assert.strictEqual(validStatuses.includes((bad as Record<string, string>).status), false)
   })
 
   test('missing status fails field check', () => {
     const bad = { type: 'STATUS' }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'status'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'status']), false)
   })
 })
 
@@ -200,35 +201,35 @@ describe('PeerIntroduction', () => {
   }
 
   test('valid INTRODUCTION has correct type literal', () => {
-    expect(valid.type).toBe('INTRODUCTION')
+    assert.strictEqual(valid.type, 'INTRODUCTION')
   })
 
   test('valid INTRODUCTION has required fields', () => {
-    expect(hasRequiredFields(valid as unknown as Record<string, unknown>, ['type', 'introduced', 'signature'])).toBe(true)
+    assert.strictEqual(hasRequiredFields(valid as unknown as Record<string, unknown>, ['type', 'introduced', 'signature']), true)
   })
 
   test('introduced sub-object has pubkey', () => {
-    expect(hasRequiredFields(valid.introduced as unknown as Record<string, unknown>, ['pubkey'])).toBe(true)
+    assert.strictEqual(hasRequiredFields(valid.introduced as unknown as Record<string, unknown>, ['pubkey']), true)
   })
 
   test('JSON round-trip preserves all fields', () => {
     const rt = roundTrip(valid)
-    expect(rt.type).toBe('INTRODUCTION')
-    expect(rt.introduced.pubkey).toBe(PUBKEY_B)
-    expect(rt.introduced.alias).toBe('bob')
-    expect(rt.introduced.capabilities!.name).toBe('quince')
-    expect(rt.introduced.message).toBe('You should talk to Bob')
-    expect(rt.signature).toBe('aabb'.repeat(32))
+    assert.strictEqual(rt.type, 'INTRODUCTION')
+    assert.strictEqual(rt.introduced.pubkey, PUBKEY_B)
+    assert.strictEqual(rt.introduced.alias, 'bob')
+    assert.strictEqual(rt.introduced.capabilities!.name, 'quince')
+    assert.strictEqual(rt.introduced.message, 'You should talk to Bob')
+    assert.strictEqual(rt.signature, 'aabb'.repeat(32))
   })
 
   test('missing signature fails field check', () => {
     const bad = { type: 'INTRODUCTION', introduced: { pubkey: PUBKEY_B } }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'introduced', 'signature'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'introduced', 'signature']), false)
   })
 
   test('missing introduced fails field check', () => {
     const bad = { type: 'INTRODUCTION', signature: 'aabb'.repeat(32) }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'introduced', 'signature'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'introduced', 'signature']), false)
   })
 
   test('introduced optional fields (alias, capabilities, message) survive omission', () => {
@@ -238,9 +239,9 @@ describe('PeerIntroduction', () => {
       signature: 'cc'.repeat(64),
     }
     const rt = roundTrip(minimal)
-    expect(rt.introduced.alias).toBeUndefined()
-    expect(rt.introduced.capabilities).toBeUndefined()
-    expect(rt.introduced.message).toBeUndefined()
+    assert.strictEqual(rt.introduced.alias, undefined)
+    assert.strictEqual(rt.introduced.capabilities, undefined)
+    assert.strictEqual(rt.introduced.message, undefined)
   })
 })
 
@@ -257,19 +258,19 @@ describe('PeerFileOffer', () => {
   }
 
   test('valid FILE_OFFER has correct type literal', () => {
-    expect(valid.type).toBe('FILE_OFFER')
+    assert.strictEqual(valid.type, 'FILE_OFFER')
   })
 
   test('valid FILE_OFFER has required fields', () => {
-    expect(hasRequiredFields(valid as unknown as Record<string, unknown>, ['type', 'messageId', 'driveKey', 'files'])).toBe(true)
+    assert.strictEqual(hasRequiredFields(valid as unknown as Record<string, unknown>, ['type', 'messageId', 'driveKey', 'files']), true)
   })
 
   test('JSON round-trip preserves files array', () => {
     const rt = roundTrip(valid)
-    expect(rt.files).toHaveLength(1)
-    expect(rt.files[0]!.name).toBe('photo.jpg')
-    expect(rt.files[0]!.size).toBe(204800)
-    expect(rt.files[0]!.hash).toBe('f'.repeat(64))
+    assert.strictEqual(rt.files.length, 1)
+    assert.strictEqual(rt.files[0]!.name, 'photo.jpg')
+    assert.strictEqual(rt.files[0]!.size, 204800)
+    assert.strictEqual(rt.files[0]!.hash, 'f'.repeat(64))
   })
 
   test('files array can contain multiple entries', () => {
@@ -281,12 +282,12 @@ describe('PeerFileOffer', () => {
       ],
     }
     const rt = roundTrip(multi)
-    expect(rt.files).toHaveLength(2)
+    assert.strictEqual(rt.files.length, 2)
   })
 
   test('missing driveKey fails field check', () => {
     const bad = { type: 'FILE_OFFER', messageId: MSG_ID, files: [] }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'messageId', 'driveKey', 'files'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'messageId', 'driveKey', 'files']), false)
   })
 })
 
@@ -300,19 +301,19 @@ describe('PeerFileRequest', () => {
   }
 
   test('valid FILE_REQUEST has correct type literal', () => {
-    expect(valid.type).toBe('FILE_REQUEST')
+    assert.strictEqual(valid.type, 'FILE_REQUEST')
   })
 
   test('JSON round-trip', () => {
     const rt = roundTrip(valid)
-    expect(rt.type).toBe('FILE_REQUEST')
-    expect(rt.messageId).toBe(MSG_ID)
-    expect(rt.files[0]!.name).toBe('photo.jpg')
+    assert.strictEqual(rt.type, 'FILE_REQUEST')
+    assert.strictEqual(rt.messageId, MSG_ID)
+    assert.strictEqual(rt.files[0]!.name, 'photo.jpg')
   })
 
   test('missing messageId fails field check', () => {
     const bad = { type: 'FILE_REQUEST', files: [] }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'messageId', 'files'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'messageId', 'files']), false)
   })
 })
 
@@ -322,18 +323,18 @@ describe('PeerFileComplete', () => {
   const valid: PeerFileComplete = { type: 'FILE_COMPLETE', messageId: MSG_ID }
 
   test('valid FILE_COMPLETE has correct type literal', () => {
-    expect(valid.type).toBe('FILE_COMPLETE')
+    assert.strictEqual(valid.type, 'FILE_COMPLETE')
   })
 
   test('JSON round-trip', () => {
     const rt = roundTrip(valid)
-    expect(rt.type).toBe('FILE_COMPLETE')
-    expect(rt.messageId).toBe(MSG_ID)
+    assert.strictEqual(rt.type, 'FILE_COMPLETE')
+    assert.strictEqual(rt.messageId, MSG_ID)
   })
 
   test('missing messageId fails field check', () => {
     const bad = { type: 'FILE_COMPLETE' }
-    expect(hasRequiredFields(bad as Record<string, unknown>, ['type', 'messageId'])).toBe(false)
+    assert.strictEqual(hasRequiredFields(bad as Record<string, unknown>, ['type', 'messageId']), false)
   })
 })
 
@@ -352,19 +353,19 @@ describe('PeerPacket union', () => {
   ]
 
   test('all 8 packet types are representable in the union', () => {
-    expect(packets).toHaveLength(8)
+    assert.strictEqual(packets.length, 8)
   })
 
   test('every packet survives JSON round-trip with type preserved', () => {
     for (const pkt of packets) {
       const rt = roundTrip(pkt)
-      expect(rt.type).toBe(pkt.type)
+      assert.strictEqual(rt.type, pkt.type)
     }
   })
 
   test('type field is the discriminant for all union members', () => {
     const types = packets.map(p => p.type)
     const unique = new Set(types)
-    expect(unique.size).toBe(packets.length)
+    assert.strictEqual(unique.size, packets.length)
   })
 })
