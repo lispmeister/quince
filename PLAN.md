@@ -1,8 +1,67 @@
 # quince
+Agent-first encrypted P2P mail for autonomous agents and humans.
 
-Agent-first SMTP MTA over the Pear P2P network.
+## System Overview
 
-## Overview
+Quince is a three-part system:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        QUINCE SYSTEM                                │
+│                                                                     │
+│  ┌──────────────────┐   ┌──────────────────┐   ┌────────────────┐  │
+│  │   Quince MTA     │   │  Quince Skill    │   │  Quince Relay  │  │
+│  │  (local daemon)  │   │  (OpenClaw)      │   │  (quincemail)  │  │
+│  │                  │   │                  │   │                │  │
+│  │ HTTP :2580       │   │ SKILL.md         │   │ SMTP gateway   │  │
+│  │ SMTP :2525       │◄──│ install.sh       │   │ MX quincemail  │  │
+│  │ POP3 :1110       │   │ curl to HTTP API │   │ Username reg.  │  │
+│  │                  │   │                  │   │ Payment hold   │  │
+│  │ Ed25519 identity │   │ Runs on agent    │   │ Hyperswarm fwd │  │
+│  │ Hyperswarm P2P   │   │ machine (local)  │   │ Web UI :2590   │  │
+│  │ Hyperdrive xfer  │   └──────────────────┘   └───────┬────────┘  │
+│  │ Gate inbox       │                                   │           │
+│  └────────┬─────────┘                                   │           │
+│           │◄────────────────── Hyperswarm ──────────────┘           │
+└───────────┼─────────────────────────────────────────────────────────┘
+            │
+     ┌──────▼──────┐
+     │  Any agent  │  Python · Node · curl · Thunderbird
+     │  or MUA     │
+     └─────────────┘
+```
+
+### Quince MTA
+The local daemon running on the agent's machine. Provides SMTP, POP3, and HTTP interfaces on localhost. Manages the Ed25519 identity, signs and verifies messages, connects to peers over Hyperswarm, and handles file transfer via Hyperdrive. The core of the system — the other two parts depend on it.
+
+### Quince Skill
+A thin OpenClaw skill (`skill/` directory). Teaches the OpenClaw agent to use the MTA via curl. Handles install, identity generation, and directory registration. No protocol logic — purely a glue layer between the agent runtime and the MTA's HTTP API.
+
+### Quince Relay
+A centralized server at `quincemail.com`. Accepts inbound SMTP from the public internet, enforces payment or whitelist rules, and forwards accepted messages to the recipient's MTA over Hyperswarm. Provides username registration, a payment hold queue, and a web management UI. Runs independently of any agent machine — it is the bridge between the legacy email world and the P2P network.
+
+### Repository Layout (mono-repo)
+```
+quince/
+├── src/           ← MTA source (TypeScript, Node.js 22.12+)
+├── dist/          ← Compiled MTA
+├── bin/           ← CLI launcher
+├── test/          ← Unit + integration tests
+├── skill/         ← OpenClaw skill
+│   ├── SKILL.md
+│   ├── install.sh
+│   └── README.md
+├── relay/         ← Relay server (future)
+│   ├── src/
+│   └── package.json
+├── shared/        ← Shared types/address parsing (future, extracted from src/)
+├── docs/
+├── install.sh     ← Standalone installer (tarball)
+├── PLAN.md
+└── CHANGELOG.md
+```
+
+## Project Overview
 
 quince is an agent-first mail transfer agent. Autonomous AI agents need strong authentication, non-repudiation, high-bandwidth file transfer, and privacy. Traditional email provides none of that. Quince does — over a decentralized P2P transport with cryptographic identities.
 
@@ -562,4 +621,57 @@ First-class integration with [OpenClaw](https://docs.openclaw.ai) agent platform
 - Contact/alias synchronization across devices
 - Outbound SMTP relay (reply to legacy email senders)
 - End-to-end encryption for gateway messages (sender encrypts to recipient pubkey)
+- USDT payment rail for legacy gateway
+
+### M17: Quince Relay
+**Spec: [RELAY-SPEC.md](./RELAY-SPEC.md)** (to be written)
+
+The centralized bridge between the public internet email network and the Quince P2P network. Runs at `quincemail.com`.
+
+**DNS & Infrastructure:**
+- `MX quincemail.com` → `mx.quincemail.com` (priority 10) — inbound SMTP
+- `A mx.quincemail.com` → relay server IP
+- `PTR <relay-IP>` → `mx.quincemail.com` — reverse DNS for outbound mail reputation
+- `SPF quincemail.com` → `v=spf1 mx ~all` — authorize relay to send payment reply emails
+- Wildcard `*.quincemail.com → 127.0.0.1` already exists for MUA compatibility (does not conflict with MX)
+
+**Relay server (`relay/src/`):**
+- Inbound SMTP listener (accepts mail from the public internet)
+- Username registry: maps `alice@quincemail.com` → Alice's Ed25519 pubkey
+- Whitelist enforcement: whitelisted senders bypass payment, delivered to main MTA inbox
+- Payment gate: unknown senders receive a payment link reply; message held 24 hours
+- Payment rails: Lightning Network (invoice in reply email, agent-parseable) + Stripe
+- Hyperswarm forwarder: delivers accepted messages to recipient MTA over P2P
+- Outbound SMTP (payment reply emails only — not a general relay)
+- REST API for web UI and MTA integration
+
+**Web UI (`relay/ui/`):**
+- Served by the relay binary on a separate port (`:2590`)
+- Username management and pubkey association
+- Whitelist management (add/remove senders and domains)
+- Payment gate queue: view, accept, reject pending messages
+- Gate rule management (mirrors `/api/gate/rules` on the MTA)
+- Relay health and delivery stats
+
+**Repository structure:**
+```
+relay/
+├── src/
+│   ├── smtp.ts       ← Inbound SMTP listener
+│   ├── registry.ts   ← Username ↔ pubkey storage
+│   ├── payment.ts    ← Lightning + Stripe payment hold
+│   ├── forwarder.ts  ← Hyperswarm delivery to recipient MTA
+│   ├── api.ts        ← REST API (UI + MTA integration)
+│   └── index.ts      ← Entry point, web UI server
+├── ui/               ← Web management interface
+└── package.json
+```
+
+**Acceptance Criteria:**
+- `alice@quincemail.com` receives inbound SMTP from Gmail, Outlook, etc.
+- Unknown senders receive a Lightning payment link reply within 5 seconds
+- Paid messages forwarded to Alice's MTA and appear in gate inbox
+- Whitelisted senders bypass payment and appear in main inbox
+- Web UI at `:2590` allows full relay management without CLI
+- All relay actions logged and auditable via web UI
 - USDT payment rail for legacy gateway
