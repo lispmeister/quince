@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
 
@@ -12,7 +13,7 @@ jobs:
     
     strategy:
       matrix:
-        node-version: [22.x, 23.x]
+        node-version: [22.12, 23.x]
     
     steps:
     - uses: actions/checkout@v4

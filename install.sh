@@ -1,12 +1,12 @@
 #!/bin/bash
 # One-line installer for quince
-# Usage: curl -fsSL https://raw.githubusercontent.com/yourusername/quince/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/lispmeister/quince/main/install.sh | bash
 
 set -e
 
 INSTALL_DIR="${HOME}/.local/bin"
 QUINCE_VERSION="0.1.0"
-REPO_URL="https://github.com/yourusername/quince"
+REPO_URL="https://github.com/lispmeister/quince"
 
 echo "Installing Quince ${QUINCE_VERSION}..."
 
@@ -16,9 +16,10 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
-NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_VERSION" -lt 22 ]; then
-    echo "Error: Node.js 22+ required (found $(node --version))"
+NODE_MAJOR=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
+NODE_MINOR=$(node --version | cut -d'v' -f2 | cut -d'.' -f2)
+if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 12 ]; }; then
+    echo "Error: Node.js 22.12+ required (found $(node --version))"
     exit 1
 fi
 
@@ -38,12 +39,6 @@ curl -fsSL "${REPO_URL}/releases/download/v${QUINCE_VERSION}/quince-${QUINCE_VER
 cp bin/quince "$INSTALL_DIR/"
 cp -r dist "$INSTALL_DIR/quince-dist"
 chmod +x "$INSTALL_DIR/quince"
-
-# Fix path in binary
-sed -i.bak "s|/tmp/quince-install/dist|${INSTALL_DIR}/quince-dist|g" "$INSTALL_DIR/quince" 2>/dev/null || \
-sed -i '' "s|/tmp/quince-install/dist|${INSTALL_DIR}/quince-dist|g" "$INSTALL_DIR/quince"
-rm -f "$INSTALL_DIR/quince.bak"
-
 # Cleanup
 cd ..
 rm -rf quince-install

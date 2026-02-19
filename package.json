@@ -2,7 +2,7 @@
   "name": "quince",
   "version": "0.1.0",
   "type": "module",
-  "engines": { "node": ">=22.0.0" },
+  "engines": { "node": ">=22.12.0" },
   "main": "dist/index.js",
   "bin": {
     "quince": "./bin/quince"
@@ -11,11 +11,10 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "npm run build && npm run start",
-    "test": "node --test test/*.test.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
     "clean": "rm -rf dist"
   },
   "devDependencies": {
-    "@types/bun": "latest",
     "@types/node": "^20",
     "typescript": "^5"
   },
