@@ -1,4 +1,5 @@
-import { test, expect, describe, beforeEach, afterEach } from 'bun:test'
+import { test, describe, beforeEach, afterEach } from 'node:test'
+import assert from 'node:assert'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -83,49 +84,49 @@ describe('quince init', () => {
 
   test('creates .quince directory', () => {
     runInit(quinceDir)
-    expect(fs.existsSync(quinceDir)).toBe(true)
+    assert.strictEqual(fs.existsSync(quinceDir), true)
   })
 
   test('creates keypair files', () => {
     runInit(quinceDir)
 
-    expect(fs.existsSync(path.join(quinceDir, 'id'))).toBe(true)
-    expect(fs.existsSync(path.join(quinceDir, 'id_pub'))).toBe(true)
+    assert.strictEqual(fs.existsSync(path.join(quinceDir, 'id')), true)
+    assert.strictEqual(fs.existsSync(path.join(quinceDir, 'id_pub')), true)
 
     const pubkey = fs.readFileSync(path.join(quinceDir, 'id_pub'), 'utf8').trim()
-    expect(pubkey).toMatch(/^[a-f0-9]{64}$/)
+    assert.ok(/^[a-f0-9]{64}$/.test(pubkey))
 
     const secretKey = fs.readFileSync(path.join(quinceDir, 'id'), 'utf8').trim()
-    expect(secretKey).toMatch(/^[a-f0-9]{128}$/)
+    assert.ok(/^[a-f0-9]{128}$/.test(secretKey))
   })
 
   test('sets private key permissions to 0600', () => {
     runInit(quinceDir)
     const idPath = path.join(quinceDir, 'id')
     const stat = fs.statSync(idPath)
-    expect(stat.mode & 0o777).toBe(0o600)
+    assert.strictEqual(stat.mode & 0o777, 0o600)
   })
 
   test('is idempotent — running twice keeps same keys', () => {
     const first = runInit(quinceDir)
     const second = runInit(quinceDir)
 
-    expect(second.publicKey).toBe(first.publicKey)
+    assert.strictEqual(second.publicKey, first.publicKey)
 
     const secret1 = fs.readFileSync(path.join(quinceDir, 'id'), 'utf8').trim()
     runInit(quinceDir)
     const secret2 = fs.readFileSync(path.join(quinceDir, 'id'), 'utf8').trim()
-    expect(secret2).toBe(secret1)
+    assert.strictEqual(secret2, secret1)
   })
 
   test('creates default config.json', () => {
     runInit(quinceDir)
     const configPath = path.join(quinceDir, CONFIG_FILE)
-    expect(fs.existsSync(configPath)).toBe(true)
+    assert.strictEqual(fs.existsSync(configPath), true)
 
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-    expect(typeof config).toBe('object')
-    expect(config.username).toBe('user')
+    assert.strictEqual(typeof config, 'object')
+    assert.strictEqual(config.username, 'user')
   })
 
   test('does not overwrite existing config.json', () => {
@@ -136,12 +137,12 @@ describe('quince init', () => {
 
     runInit(quinceDir)
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
-    expect(config.username).toBe('alice')
+    assert.strictEqual(config.username, 'alice')
   })
 
   test('returns public key in email address format', () => {
     const { publicKey, emailAddress } = runInit(quinceDir)
-    expect(emailAddress).toBe(`user@${publicKey}.${EMAIL_DOMAIN}`)
-    expect(emailAddress).toContain('.quincemail.com')
+    assert.strictEqual(emailAddress, `user@${publicKey}.${EMAIL_DOMAIN}`)
+    assert.ok(emailAddress.includes('.quincemail.com'))
   })
 })

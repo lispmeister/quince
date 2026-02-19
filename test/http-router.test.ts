@@ -1,7 +1,8 @@
-import { test, expect, describe } from 'bun:test'
-import { Router } from '../src/http/router.js'
-import type { HttpRequest, HttpResponse } from '../src/http/parser.js'
-import { jsonResponse } from '../src/http/parser.js'
+import { test, describe } from 'node:test'
+import assert from 'node:assert'
+import { Router } from '../dist/http/router.js'
+import type { HttpRequest, HttpResponse } from '../dist/http/parser.js'
+import { jsonResponse } from '../dist/http/parser.js'
 
 function dummyHandler(_req: HttpRequest, _params: Record<string, string>): HttpResponse {
   return jsonResponse({ ok: true })
@@ -12,52 +13,52 @@ describe('Router', () => {
     const r = new Router()
     r.add('GET', '/api/identity', dummyHandler)
     const m = r.match('GET', '/api/identity')
-    expect(m).not.toBeNull()
-    expect(m!.params).toEqual({})
+    assert.notStrictEqual(m, null)
+    assert.deepStrictEqual(m!.params, {})
   })
 
   test('does not match wrong method', () => {
     const r = new Router()
     r.add('GET', '/api/identity', dummyHandler)
-    expect(r.match('POST', '/api/identity')).toBeNull()
+    assert.strictEqual(r.match('POST', '/api/identity'), null)
   })
 
   test('does not match wrong path', () => {
     const r = new Router()
     r.add('GET', '/api/identity', dummyHandler)
-    expect(r.match('GET', '/api/peers')).toBeNull()
+    assert.strictEqual(r.match('GET', '/api/peers'), null)
   })
 
   test('matches parameterized path', () => {
     const r = new Router()
     r.add('GET', '/api/inbox/:id', dummyHandler)
     const m = r.match('GET', '/api/inbox/msg-123')
-    expect(m).not.toBeNull()
-    expect(m!.params).toEqual({ id: 'msg-123' })
+    assert.notStrictEqual(m, null)
+    assert.deepStrictEqual(m!.params, { id: 'msg-123' })
   })
 
   test('matches path with multiple params', () => {
     const r = new Router()
     r.add('GET', '/api/peers/:pubkey/status', dummyHandler)
     const m = r.match('GET', '/api/peers/abc123/status')
-    expect(m).not.toBeNull()
-    expect(m!.params).toEqual({ pubkey: 'abc123' })
+    assert.notStrictEqual(m, null)
+    assert.deepStrictEqual(m!.params, { pubkey: 'abc123' })
   })
 
   test('matches wildcard path', () => {
     const r = new Router()
     r.add('GET', '/media/*', dummyHandler)
     const m = r.match('GET', '/media/photos/cat.jpg')
-    expect(m).not.toBeNull()
-    expect(m!.params['*']).toBe('photos/cat.jpg')
+    assert.notStrictEqual(m, null)
+    assert.strictEqual(m!.params['*'], 'photos/cat.jpg')
   })
 
   test('wildcard captures single segment', () => {
     const r = new Router()
     r.add('GET', '/media/*', dummyHandler)
     const m = r.match('GET', '/media/file.txt')
-    expect(m).not.toBeNull()
-    expect(m!.params['*']).toBe('file.txt')
+    assert.notStrictEqual(m, null)
+    assert.strictEqual(m!.params['*'], 'file.txt')
   })
 
   test('wildcard matches /media with empty wildcard', () => {
@@ -65,32 +66,32 @@ describe('Router', () => {
     r.add('GET', '/media/*', dummyHandler)
     // /media matches with empty wildcard (handler decides what to do)
     const m = r.match('GET', '/media')
-    expect(m).not.toBeNull()
-    expect(m!.params['*']).toBe('')
+    assert.notStrictEqual(m, null)
+    assert.strictEqual(m!.params['*'], '')
   })
 
   test('returns null when no routes match', () => {
     const r = new Router()
     r.add('GET', '/api/inbox', dummyHandler)
-    expect(r.match('GET', '/api/unknown')).toBeNull()
+    assert.strictEqual(r.match('GET', '/api/unknown'), null)
   })
 
   test('method matching is case-insensitive', () => {
     const r = new Router()
     r.add('get', '/api/inbox', dummyHandler)
-    expect(r.match('GET', '/api/inbox')).not.toBeNull()
+    assert.notStrictEqual(r.match('GET', '/api/inbox'), null)
   })
 
   test('exact path does not match extra segments', () => {
     const r = new Router()
     r.add('GET', '/api/inbox', dummyHandler)
-    expect(r.match('GET', '/api/inbox/extra')).toBeNull()
+    assert.strictEqual(r.match('GET', '/api/inbox/extra'), null)
   })
 
   test('parameterized path does not match fewer segments', () => {
     const r = new Router()
     r.add('GET', '/api/inbox/:id/raw', dummyHandler)
-    expect(r.match('GET', '/api/inbox/msg-123')).toBeNull()
+    assert.strictEqual(r.match('GET', '/api/inbox/msg-123'), null)
   })
 
   test('distinguishes exact from parameterized on same prefix', () => {
@@ -101,19 +102,19 @@ describe('Router', () => {
     r.add('GET', '/api/inbox/:id', getHandler)
 
     const listMatch = r.match('GET', '/api/inbox')
-    expect(listMatch).not.toBeNull()
-    expect(listMatch!.handler).toBe(listHandler)
+    assert.notStrictEqual(listMatch, null)
+    assert.strictEqual(listMatch!.handler, listHandler)
 
     const getMatch = r.match('GET', '/api/inbox/msg-1')
-    expect(getMatch).not.toBeNull()
-    expect(getMatch!.handler).toBe(getHandler)
+    assert.notStrictEqual(getMatch, null)
+    assert.strictEqual(getMatch!.handler, getHandler)
   })
 
   test('URL-decodes path segments', () => {
     const r = new Router()
     r.add('GET', '/api/inbox/:id', dummyHandler)
     const m = r.match('GET', '/api/inbox/hello%20world')
-    expect(m).not.toBeNull()
-    expect(m!.params['id']).toBe('hello world')
+    assert.notStrictEqual(m, null)
+    assert.strictEqual(m!.params['id'], 'hello world')
   })
 })

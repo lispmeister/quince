@@ -1,4 +1,5 @@
-import { test, expect, describe, beforeEach, afterEach } from 'bun:test'
+import { test, describe, beforeEach, afterEach } from 'node:test'
+import assert from 'node:assert'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -219,33 +220,33 @@ afterEach(() => {
 
 describe('validateAlias', () => {
   test('accepts valid aliases', () => {
-    expect(validateAlias('bob')).toBeNull()
-    expect(validateAlias('alice-1')).toBeNull()
-    expect(validateAlias('peer.name')).toBeNull()
-    expect(validateAlias('user_2')).toBeNull()
+    assert.strictEqual(validateAlias('bob'), null)
+    assert.strictEqual(validateAlias('alice-1'), null)
+    assert.strictEqual(validateAlias('peer.name'), null)
+    assert.strictEqual(validateAlias('user_2'), null)
   })
 
   test('rejects empty alias', () => {
-    expect(validateAlias('')).not.toBeNull()
+    assert.notStrictEqual(validateAlias(''), null)
   })
 
   test('rejects alias longer than 32 chars', () => {
-    expect(validateAlias('a'.repeat(33))).not.toBeNull()
+    assert.notStrictEqual(validateAlias('a'.repeat(33)), null)
   })
 
   test('rejects special characters', () => {
-    expect(validateAlias('bob@host')).not.toBeNull()
-    expect(validateAlias('alice smith')).not.toBeNull()
+    assert.notStrictEqual(validateAlias('bob@host'), null)
+    assert.notStrictEqual(validateAlias('alice smith'), null)
   })
 
   test('rejects 64-char hex string (looks like pubkey)', () => {
-    expect(validateAlias('a'.repeat(64))).not.toBeNull()
+    assert.notStrictEqual(validateAlias('a'.repeat(64)), null)
   })
 })
 
 describe('validateConfig', () => {
   test('accepts empty config', () => {
-    expect(validateConfig({})).toHaveLength(0)
+    assert.strictEqual(validateConfig({}).length, 0)
   })
 
   test('accepts valid full config', () => {
@@ -254,28 +255,28 @@ describe('validateConfig', () => {
       smtpPort: 2525,
       peers: { bob: VALID_PUBKEY }
     }
-    expect(validateConfig(config)).toHaveLength(0)
+    assert.strictEqual(validateConfig(config).length, 0)
   })
 
   test('rejects non-object config', () => {
-    expect(validateConfig('not-an-object')).not.toHaveLength(0)
-    expect(validateConfig(null)).not.toHaveLength(0)
+    assert.notStrictEqual(validateConfig('not-an-object').length, 0)
+    assert.notStrictEqual(validateConfig(null).length, 0)
   })
 
   test('rejects invalid smtpPort', () => {
-    expect(validateConfig({ smtpPort: 'abc' })).not.toHaveLength(0)
-    expect(validateConfig({ smtpPort: 0 })).not.toHaveLength(0)
-    expect(validateConfig({ smtpPort: 99999 })).not.toHaveLength(0)
+    assert.notStrictEqual(validateConfig({ smtpPort: 'abc' }).length, 0)
+    assert.notStrictEqual(validateConfig({ smtpPort: 0 }).length, 0)
+    assert.notStrictEqual(validateConfig({ smtpPort: 99999 }).length, 0)
   })
 
   test('rejects invalid peer pubkey', () => {
     const config = { peers: { bob: 'not-a-pubkey' } }
-    expect(validateConfig(config)).not.toHaveLength(0)
+    assert.notStrictEqual(validateConfig(config).length, 0)
   })
 
   test('rejects invalid peer alias', () => {
     const config = { peers: { 'bad alias!': VALID_PUBKEY } }
-    expect(validateConfig(config)).not.toHaveLength(0)
+    assert.notStrictEqual(validateConfig(config).length, 0)
   })
 })
 
@@ -284,31 +285,31 @@ describe('addPeer', () => {
     const config: Config = {}
     const result = addPeer(config, 'bob', VALID_PUBKEY)
 
-    expect(result.peers).toBeDefined()
-    expect(result.peers!['bob']).toBe(VALID_PUBKEY)
+    assert.notStrictEqual(result.peers, undefined)
+    assert.strictEqual(result.peers!['bob'], VALID_PUBKEY)
   })
 
   test('adds peer to config with existing peers', () => {
     const config: Config = { peers: { alice: VALID_PUBKEY } }
     const result = addPeer(config, 'bob', VALID_PUBKEY_2)
 
-    expect(Object.keys(result.peers!)).toHaveLength(2)
-    expect(result.peers!['alice']).toBe(VALID_PUBKEY)
-    expect(result.peers!['bob']).toBe(VALID_PUBKEY_2)
+    assert.strictEqual(Object.keys(result.peers!).length, 2)
+    assert.strictEqual(result.peers!['alice'], VALID_PUBKEY)
+    assert.strictEqual(result.peers!['bob'], VALID_PUBKEY_2)
   })
 
   test('lowercases pubkey', () => {
     const config: Config = {}
     const result = addPeer(config, 'bob', 'A'.repeat(64))
-    expect(result.peers!['bob']).toBe('a'.repeat(64))
+    assert.strictEqual(result.peers!['bob'], 'a'.repeat(64))
   })
 
   test('does not mutate original config', () => {
     const config: Config = { peers: { alice: VALID_PUBKEY } }
     const result = addPeer(config, 'bob', VALID_PUBKEY_2)
 
-    expect(config.peers!['bob']).toBeUndefined()
-    expect(result.peers!['bob']).toBe(VALID_PUBKEY_2)
+    assert.strictEqual(config.peers!['bob'], undefined)
+    assert.strictEqual(result.peers!['bob'], VALID_PUBKEY_2)
   })
 })
 
@@ -317,50 +318,50 @@ describe('removePeer', () => {
     const config: Config = { peers: { alice: VALID_PUBKEY, bob: VALID_PUBKEY_2 } }
     const result = removePeer(config, 'bob')
 
-    expect(result.peers!['alice']).toBe(VALID_PUBKEY)
-    expect(result.peers!['bob']).toBeUndefined()
+    assert.strictEqual(result.peers!['alice'], VALID_PUBKEY)
+    assert.strictEqual(result.peers!['bob'], undefined)
   })
 
   test('does not mutate original config', () => {
     const config: Config = { peers: { bob: VALID_PUBKEY } }
     const result = removePeer(config, 'bob')
 
-    expect(config.peers!['bob']).toBe(VALID_PUBKEY)
-    expect(result.peers!['bob']).toBeUndefined()
+    assert.strictEqual(config.peers!['bob'], VALID_PUBKEY)
+    assert.strictEqual(result.peers!['bob'], undefined)
   })
 })
 
 describe('getPeerPubkey', () => {
   test('returns pubkey for known alias', () => {
     const config: Config = { peers: { bob: VALID_PUBKEY } }
-    expect(getPeerPubkey(config, 'bob')).toBe(VALID_PUBKEY)
+    assert.strictEqual(getPeerPubkey(config, 'bob'), VALID_PUBKEY)
   })
 
   test('returns undefined for unknown alias', () => {
     const config: Config = { peers: { bob: VALID_PUBKEY } }
-    expect(getPeerPubkey(config, 'alice')).toBeUndefined()
+    assert.strictEqual(getPeerPubkey(config, 'alice'), undefined)
   })
 
   test('returns undefined when no peers', () => {
     const config: Config = {}
-    expect(getPeerPubkey(config, 'bob')).toBeUndefined()
+    assert.strictEqual(getPeerPubkey(config, 'bob'), undefined)
   })
 })
 
 describe('getPeerAlias', () => {
   test('returns alias for known pubkey', () => {
     const config: Config = { peers: { bob: VALID_PUBKEY } }
-    expect(getPeerAlias(config, VALID_PUBKEY)).toBe('bob')
+    assert.strictEqual(getPeerAlias(config, VALID_PUBKEY), 'bob')
   })
 
   test('matches case-insensitively', () => {
     const config: Config = { peers: { bob: VALID_PUBKEY } }
-    expect(getPeerAlias(config, VALID_PUBKEY.toUpperCase())).toBe('bob')
+    assert.strictEqual(getPeerAlias(config, VALID_PUBKEY.toUpperCase()), 'bob')
   })
 
   test('returns undefined for unknown pubkey', () => {
     const config: Config = { peers: { bob: VALID_PUBKEY } }
-    expect(getPeerAlias(config, VALID_PUBKEY_2)).toBeUndefined()
+    assert.strictEqual(getPeerAlias(config, VALID_PUBKEY_2), undefined)
   })
 })
 
@@ -374,11 +375,11 @@ describe('saveConfig and loadConfig round-trip', () => {
     }
 
     const saved = saveConfig(testDir, config)
-    expect(saved).toBe(true)
+    assert.strictEqual(saved, true)
 
     const loaded = loadConfig(testDir)
-    expect(loaded.username).toBe('alice')
-    expect(loaded.peers!['bob']).toBe(VALID_PUBKEY)
+    assert.strictEqual(loaded.username, 'alice')
+    assert.strictEqual(loaded.peers!['bob'], VALID_PUBKEY)
   })
 
   test('add-peer round-trips through save/load', () => {
@@ -388,11 +389,11 @@ describe('saveConfig and loadConfig round-trip', () => {
 
     config = addPeer(config, 'bob', VALID_PUBKEY)
     const saved = saveConfig(testDir, config)
-    expect(saved).toBe(true)
+    assert.strictEqual(saved, true)
 
     const loaded = loadConfig(testDir)
-    expect(loaded.peers).toBeDefined()
-    expect(loaded.peers!['bob']).toBe(VALID_PUBKEY)
+    assert.notStrictEqual(loaded.peers, undefined)
+    assert.strictEqual(loaded.peers!['bob'], VALID_PUBKEY)
   })
 
   test('add then remove peer round-trips', () => {
@@ -405,16 +406,16 @@ describe('saveConfig and loadConfig round-trip', () => {
     saveConfig(testDir, config)
 
     const loaded = loadConfig(testDir)
-    expect(loaded.peers!['bob']).toBeUndefined()
+    assert.strictEqual(loaded.peers!['bob'], undefined)
   })
 
   test('saveConfig returns false for invalid config', () => {
     const invalid = { smtpPort: 'not-a-number' } as unknown as Config
     const saved = saveConfig(testDir, invalid)
-    expect(saved).toBe(false)
+    assert.strictEqual(saved, false)
 
     // File should not exist
-    expect(fs.existsSync(path.join(testDir, 'config.json'))).toBe(false)
+    assert.strictEqual(fs.existsSync(path.join(testDir, 'config.json')), false)
   })
 
   test('saveConfig creates directory if missing', () => {
@@ -422,8 +423,8 @@ describe('saveConfig and loadConfig round-trip', () => {
     const config: Config = { peers: { bob: VALID_PUBKEY } }
 
     const saved = saveConfig(nestedDir, config)
-    expect(saved).toBe(true)
-    expect(fs.existsSync(path.join(nestedDir, 'config.json'))).toBe(true)
+    assert.strictEqual(saved, true)
+    assert.strictEqual(fs.existsSync(path.join(nestedDir, 'config.json')), true)
   })
 
   test('multiple peers persist correctly', () => {
@@ -434,9 +435,9 @@ describe('saveConfig and loadConfig round-trip', () => {
     saveConfig(testDir, config)
 
     const loaded = loadConfig(testDir)
-    expect(Object.keys(loaded.peers!)).toHaveLength(2)
-    expect(loaded.peers!['bob']).toBe(VALID_PUBKEY)
-    expect(loaded.peers!['carol']).toBe(VALID_PUBKEY_2)
+    assert.strictEqual(Object.keys(loaded.peers!).length, 2)
+    assert.strictEqual(loaded.peers!['bob'], VALID_PUBKEY)
+    assert.strictEqual(loaded.peers!['carol'], VALID_PUBKEY_2)
   })
 })
 
@@ -453,17 +454,17 @@ describe('loadConfig with invalid placeholder values', () => {
 
     // loadConfig should strip all invalid fields
     let config = loadConfig(testDir)
-    expect(config.username).toBeUndefined()
-    expect(config.smtpPort).toBeUndefined()
+    assert.strictEqual(config.username, undefined)
+    assert.strictEqual(config.smtpPort, undefined)
 
     // Now add-peer → save should succeed
     config = addPeer(config, 'bob', VALID_PUBKEY)
     const saved = saveConfig(testDir, config)
-    expect(saved).toBe(true)
+    assert.strictEqual(saved, true)
 
     // Verify the peer persisted
     const loaded = loadConfig(testDir)
-    expect(loaded.peers!['bob']).toBe(VALID_PUBKEY)
+    assert.strictEqual(loaded.peers!['bob'], VALID_PUBKEY)
   })
 
   test('preserves valid fields while stripping invalid ones', () => {
@@ -478,27 +479,27 @@ describe('loadConfig with invalid placeholder values', () => {
     fs.writeFileSync(path.join(testDir, 'config.json'), JSON.stringify(mixedConfig))
 
     const config = loadConfig(testDir)
-    expect(config.username).toBe('alice')
-    expect(config.smtpPort).toBeUndefined()
-    expect(config.peers!['bob']).toBe(VALID_PUBKEY)
-    expect(config.peers!['bad alias!']).toBeUndefined()
+    assert.strictEqual(config.username, 'alice')
+    assert.strictEqual(config.smtpPort, undefined)
+    assert.strictEqual(config.peers!['bob'], VALID_PUBKEY)
+    assert.strictEqual(config.peers!['bad alias!'], undefined)
   })
 })
 
 describe('trustIntroductions validation', () => {
   test('accepts valid trustIntroductions', () => {
     const config = { trustIntroductions: { alice: true, bob: false } }
-    expect(validateConfig(config)).toHaveLength(0)
+    assert.strictEqual(validateConfig(config).length, 0)
   })
 
   test('rejects non-object trustIntroductions', () => {
-    expect(validateConfig({ trustIntroductions: 'not-an-object' })).not.toHaveLength(0)
-    expect(validateConfig({ trustIntroductions: [true] })).not.toHaveLength(0)
+    assert.notStrictEqual(validateConfig({ trustIntroductions: 'not-an-object' }).length, 0)
+    assert.notStrictEqual(validateConfig({ trustIntroductions: [true] }).length, 0)
   })
 
   test('rejects non-boolean values', () => {
     const config = { trustIntroductions: { alice: 'yes' } }
-    expect(validateConfig(config)).not.toHaveLength(0)
+    assert.notStrictEqual(validateConfig(config).length, 0)
   })
 
   test('round-trips through save/load', () => {
@@ -507,9 +508,9 @@ describe('trustIntroductions validation', () => {
     }
 
     const saved = saveConfig(testDir, config)
-    expect(saved).toBe(true)
+    assert.strictEqual(saved, true)
 
     const loaded = loadConfig(testDir)
-    expect(loaded.trustIntroductions).toEqual({ alice: true, bob: false })
+    assert.deepStrictEqual(loaded.trustIntroductions, { alice: true, bob: false })
   })
 })

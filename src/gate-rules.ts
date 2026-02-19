@@ -1,6 +1,6 @@
-import fs from 'bare-fs'
-import path from 'bare-path'
-import os from 'bare-os'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
 import { generateId } from './utils.js'
 import type { GateEntry } from './gate.js'
 

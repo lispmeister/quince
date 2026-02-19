@@ -478,7 +478,49 @@ Bridge the public internet email network to Quince. Unknown senders pay per-mess
 
 **Inbound only for MVP** — no outbound SMTP relay.
 
-### M15: OpenClaw Integration
+### M15: Node.js Standardization [PRIORITY]
+
+**Decision**: Drop the Bare runtime. Standardize on Node.js 22+ as the sole runtime, aligning with OpenClaw's environment.
+
+**Rationale**: OpenClaw is the primary (and only) target environment. Adding Bare support introduces unnecessary complexity when all P2P functionality (Hyperswarm, Hyperdrive, Ed25519) works identically on Node.js.
+
+**Required Changes:**
+
+- [ ] **Remove Bare dependencies** — Strip all Bare-specific packages from package.json
+  - Remove: `bare`, `bare-env`, `bare-events`, `bare-fs`, `bare-os`, `bare-path`, `bare-process`, `bare-tcp`
+  - Replace with native Node.js equivalents: `fs`, `path`, `os`, `process`, `events`, `crypto`
+
+- [ ] **Update CLI launcher** — Replace `bin/quince` wrapper
+  - Current: Calls `$DIR/node_modules/.bin/bare`
+  - New: Direct `node dist/index.js` execution
+  - Remove symlink resolution logic if no longer needed
+
+- [ ] **npm publish readiness** — Prepare for `npm install -g quince`
+  - Remove `"private": true` from package.json
+  - Add `engines` field: `{"node": ">=22.0.0"}`
+  - Remove Bun-specific scripts (`bun run build` → `npm run build`)
+  - Verify all Hyperswarm dependencies install cleanly via npm
+
+- [ ] **Update build system** — Remove Bun dependency
+  - Replace `bun.lock` with `package-lock.json` (npm)
+  - Update build scripts to use `tsc` directly, not Bun's bundler
+  - Ensure `npm run build` compiles TypeScript
+
+- [ ] **Update SKILL.md** — Remove Bun requirement
+  - Remove `requires: { binaries: ["bun"] }` from skill metadata
+  - Update install instructions to use `npm install -g quince`
+  - Skill now works with just `curl` and the quince CLI
+
+**Acceptance Criteria:**
+- `npm install -g quince` installs successfully on Node 22+ without Bun or Bare
+- `quince start` launches daemon using Node.js
+- All HTTP API endpoints work (inbox, send, peers, transfers, introductions)
+- P2P Hyperswarm connections work (peer discovery, message sending, file transfer)
+- Ed25519 key generation and message signing work via `crypto` module
+- Unit tests pass: `npm test`
+- Integration tests pass: Two Node.js daemons can communicate via Hyperswarm
+
+### M16: OpenClaw Integration
 **Spec: [OPENCLAW-INTEGRATION.md](./OPENCLAW-INTEGRATION.md)**
 
 First-class integration with [OpenClaw](https://docs.openclaw.ai) agent platform.

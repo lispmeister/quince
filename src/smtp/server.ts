@@ -1,4 +1,4 @@
-import tcp from 'bare-tcp'
+import net from 'net'
 import { SmtpSession } from './session.js'
 
 export interface SmtpServerConfig {
@@ -11,7 +11,7 @@ export interface SmtpServerConfig {
 }
 
 export class SmtpServer {
-  private server: ReturnType<typeof tcp.createServer> | null = null
+  private server: ReturnType<typeof net.createServer> | null = null
   private config: SmtpServerConfig
 
   constructor(config: SmtpServerConfig) {
@@ -20,7 +20,7 @@ export class SmtpServer {
 
   start(): Promise<number> {
     return new Promise((resolve, reject) => {
-      this.server = tcp.createServer()
+      this.server = net.createServer()
 
       this.server.on('connection', (socket: any) => {
         this.handleConnection(socket)

@@ -1,14 +1,14 @@
-import { test, expect, describe } from 'bun:test'
+import { test, describe } from 'node:test'
+import assert from 'node:assert'
 import crypto from 'hypercore-crypto'
-import b4a from 'b4a'
-import { signMessage, verifyMessage } from '../src/crypto.js'
-import { SmtpSession } from '../src/smtp/session.js'
+import { signMessage, verifyMessage } from '../dist/crypto.js'
+import { SmtpSession } from '../dist/smtp/session.js'
 
 function makeKeyPair() {
   const kp = (crypto as any).keyPair()
   return {
-    publicKey: b4a.toString(kp.publicKey, 'hex'),
-    secretKey: b4a.toString(kp.secretKey, 'hex')
+    publicKey: kp.publicKey.toString('hex'),
+    secretKey: kp.secretKey.toString('hex')
   }
 }
 
@@ -33,7 +33,7 @@ function simulateSend(
         // Same construction as index.ts
         const fullMessage = `From: ${smtpFrom}\r\nTo: ${smtpTo}\r\n${data}`
         const signed = signMessage(fullMessage, senderSecretKey)
-        const encoded = b4a.toString(b4a.from(signed, 'utf8'), 'base64')
+        const encoded = Buffer.from(signed, 'utf8').toString('base64')
         resolve({ signedMime: signed, encodedMime: encoded })
       }
     })
@@ -50,7 +50,7 @@ function simulateSend(
 }
 
 function simulateReceive(encodedMime: string, senderPubkey: string): { mime: string; valid: boolean } {
-  const raw = b4a.toString(b4a.from(encodedMime, 'base64'), 'utf8')
+  const raw = Buffer.from(encodedMime, 'base64').toString('utf8')
   return verifyMessage(raw, senderPubkey)
 }
 
@@ -65,11 +65,11 @@ describe('end-to-end: Alice sends to Bob', () => {
     // Bob receives and verifies using Alice's public key
     const { mime, valid } = simulateReceive(encodedMime, ALICE.publicKey)
 
-    expect(valid).toBe(true)
-    expect(mime).toContain('From: ' + fromAddr)
-    expect(mime).toContain('Subject: Hello Bob')
-    expect(mime).toContain('This is a secret message.')
-    expect(mime).toContain('X-Quince-Signature')
+    assert.strictEqual(valid, true)
+    assert.ok(mime.includes('From: ' + fromAddr))
+    assert.ok(mime.includes('Subject: Hello Bob'))
+    assert.ok(mime.includes('This is a secret message.'))
+    assert.ok(mime.includes('X-Quince-Signature'))
   })
 
   test('invalid signature: Bob rejects message verified against wrong key', async () => {
@@ -78,7 +78,7 @@ describe('end-to-end: Alice sends to Bob', () => {
     // Bob mistakenly verifies against his own key (or an impersonator scenario)
     const { valid } = simulateReceive(encodedMime, BOB.publicKey)
 
-    expect(valid).toBe(false)
+    assert.strictEqual(valid, false)
   })
 
   test('invalid signature: tampered message detected', async () => {
@@ -86,11 +86,11 @@ describe('end-to-end: Alice sends to Bob', () => {
 
     // Attacker modifies the body after signing
     const tampered = signedMime.replace('secret message', 'tampered message')
-    const encoded = b4a.toString(b4a.from(tampered, 'utf8'), 'base64')
+    const encoded = Buffer.from(tampered, 'utf8').toString('base64')
 
     const { valid } = simulateReceive(encoded, ALICE.publicKey)
 
-    expect(valid).toBe(false)
+    assert.strictEqual(valid, false)
   })
 
   test('round-trip preserves original message content', async () => {
@@ -99,14 +99,14 @@ describe('end-to-end: Alice sends to Bob', () => {
 
     // The verified MIME should have the signature preserved and content intact
     const sepIndex = mime.indexOf('\r\n\r\n')
-    expect(sepIndex).toBeGreaterThan(0)
+    assert.ok(sepIndex > 0)
 
     const headers = mime.slice(0, sepIndex)
     const body = mime.slice(sepIndex + 4)
 
-    expect(headers).toContain('From: ' + fromAddr)
-    expect(headers).toContain('To: ' + toAddr)
-    expect(headers).toContain('Subject: Hello Bob')
-    expect(body).toBe('This is a secret message.')
+    assert.ok(headers.includes('From: ' + fromAddr))
+    assert.ok(headers.includes('To: ' + toAddr))
+    assert.ok(headers.includes('Subject: Hello Bob'))
+    assert.strictEqual(body, 'This is a secret message.')
   })
 })

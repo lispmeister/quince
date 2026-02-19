@@ -1,6 +1,5 @@
-import { EventEmitter } from 'bare-events'
+import { EventEmitter } from 'events'
 import Hyperswarm, { type Peer, type PeerInfo, type Discovery } from 'hyperswarm'
-import b4a from 'b4a'
 import type { PeerPacket, PeerMessage, PeerAck, PeerIdentify, PeerFileOffer, PeerFileRequest, PeerFileComplete, PeerStatus, PeerIntroduction, PeerCapabilities } from './types.js'
 import type { Identity } from '../identity.js'
 
@@ -60,7 +59,7 @@ export class Transport extends EventEmitter {
     super()
     this.identity = identity
     this.config = config
-    this.topic = b4a.from(identity.publicKey, 'hex')
+    this.topic = Buffer.from(identity.publicKey, 'hex')
     this.swarm = new Hyperswarm()
 
     this.swarm.on('connection', (peer: Peer, info: PeerInfo) => {
@@ -73,7 +72,7 @@ export class Transport extends EventEmitter {
   }
 
   private handleConnection(peer: Peer, info: PeerInfo): void {
-    const connKey = b4a.toString(peer.remotePublicKey, 'hex').slice(0, 8)
+    const connKey = Buffer.from(peer.remotePublicKey).toString('hex').slice(0, 8)
     console.log(`New connection: ${connKey}...`)
 
     // Track this connection
@@ -121,7 +120,7 @@ export class Transport extends EventEmitter {
     const conn = this.connections.get(peer)
     if (!conn) return
 
-    conn.buffer += b4a.toString(data, 'utf8')
+    conn.buffer += data.toString('utf8')
 
     // Process complete JSON lines
     let newlineIdx: number
@@ -258,7 +257,7 @@ export class Transport extends EventEmitter {
 
   async connectToPeer(pubkey: string): Promise<void> {
     // To connect to a peer, we join their topic (their public key)
-    const peerTopic = b4a.from(pubkey, 'hex')
+    const peerTopic = Buffer.from(pubkey, 'hex')
     const discovery = this.swarm.join(peerTopic, { client: true, server: false })
     await discovery.flushed()
   }

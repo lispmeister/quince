@@ -1,4 +1,5 @@
-import { test, expect, describe } from 'bun:test'
+import { test, describe } from 'node:test'
+import assert from 'node:assert'
 
 // src/identity.ts transitively imports bare-path / bare-fs / bare-os which
 // require the Bare runtime.  We inline the two pure functions under test
@@ -57,81 +58,81 @@ const PUBKEY_MIXED = 'aAbBcCdDeEfF'.repeat(5) + 'aAbB'  // 64 chars, mixed case
 describe('parseEmailDomain — pubkey addresses', () => {
   test('parses user@<64hexchars>.quincemail.com', () => {
     const result = parseEmailDomain(`alice@${PUBKEY}.quincemail.com`)
-    expect(result).not.toBeNull()
-    expect(result!.username).toBe('alice')
-    expect(result!.publicKey).toBe(PUBKEY)
-    expect(result!.alias).toBeUndefined()
+    assert.notStrictEqual(result, null)
+    assert.strictEqual(result!.username, 'alice')
+    assert.strictEqual(result!.publicKey, PUBKEY)
+    assert.strictEqual(result!.alias, undefined)
   })
 
   test('normalises pubkey to lowercase', () => {
     const result = parseEmailDomain(`alice@${PUBKEY_UPPER}.quincemail.com`)
-    expect(result).not.toBeNull()
-    expect(result!.publicKey).toBe(PUBKEY_UPPER.toLowerCase())
+    assert.notStrictEqual(result, null)
+    assert.strictEqual(result!.publicKey, PUBKEY_UPPER.toLowerCase())
   })
 
   test('normalises mixed-case pubkey to lowercase', () => {
     const result = parseEmailDomain(`alice@${PUBKEY_MIXED}.quincemail.com`)
-    expect(result).not.toBeNull()
-    expect(result!.publicKey).toBe(PUBKEY_MIXED.toLowerCase())
+    assert.notStrictEqual(result, null)
+    assert.strictEqual(result!.publicKey, PUBKEY_MIXED.toLowerCase())
   })
 
   test('case-insensitive domain match', () => {
     const result = parseEmailDomain(`alice@${PUBKEY}.QUINCEMAIL.COM`)
-    expect(result).not.toBeNull()
-    expect(result!.publicKey).toBe(PUBKEY)
+    assert.notStrictEqual(result, null)
+    assert.strictEqual(result!.publicKey, PUBKEY)
   })
 
   test('no alias field on pubkey result', () => {
     const result = parseEmailDomain(`bob@${PUBKEY}.quincemail.com`)
-    expect(result!.alias).toBeUndefined()
-    expect(result!.publicKey).toBeDefined()
+    assert.strictEqual(result!.alias, undefined)
+    assert.notStrictEqual(result!.publicKey, undefined)
   })
 })
 
 describe('parseEmailDomain — alias addresses', () => {
   test('parses user@alias.quincemail.com', () => {
     const result = parseEmailDomain('alice@myalias.quincemail.com')
-    expect(result).not.toBeNull()
-    expect(result!.username).toBe('alice')
-    expect(result!.alias).toBe('myalias')
-    expect(result!.publicKey).toBeUndefined()
+    assert.notStrictEqual(result, null)
+    assert.strictEqual(result!.username, 'alice')
+    assert.strictEqual(result!.alias, 'myalias')
+    assert.strictEqual(result!.publicKey, undefined)
   })
 
   test('alias is normalised to lowercase', () => {
     const result = parseEmailDomain('alice@MyAlias.quincemail.com')
-    expect(result).not.toBeNull()
-    expect(result!.alias).toBe('myalias')
+    assert.notStrictEqual(result, null)
+    assert.strictEqual(result!.alias, 'myalias')
   })
 
   test('short hex subdomain is treated as alias (not pubkey)', () => {
     const result = parseEmailDomain('user@abc123.quincemail.com')
-    expect(result).not.toBeNull()
-    expect(result!.alias).toBe('abc123')
-    expect(result!.publicKey).toBeUndefined()
+    assert.notStrictEqual(result, null)
+    assert.strictEqual(result!.alias, 'abc123')
+    assert.strictEqual(result!.publicKey, undefined)
   })
 
   test('63-char hex string is treated as alias (one char short)', () => {
     const shortHex = 'a'.repeat(63)
     const result = parseEmailDomain(`user@${shortHex}.quincemail.com`)
-    expect(result).not.toBeNull()
-    expect(result!.alias).toBe(shortHex)
-    expect(result!.publicKey).toBeUndefined()
+    assert.notStrictEqual(result, null)
+    assert.strictEqual(result!.alias, shortHex)
+    assert.strictEqual(result!.publicKey, undefined)
   })
 
   test('65-char hex string is treated as alias (one char over)', () => {
     const longHex = 'a'.repeat(65)
     const result = parseEmailDomain(`user@${longHex}.quincemail.com`)
-    expect(result).not.toBeNull()
-    expect(result!.alias).toBe(longHex)
-    expect(result!.publicKey).toBeUndefined()
+    assert.notStrictEqual(result, null)
+    assert.strictEqual(result!.alias, longHex)
+    assert.strictEqual(result!.publicKey, undefined)
   })
 
   test('64-char non-hex subdomain is treated as alias', () => {
     const nonHex = 'g'.repeat(64)   // 'g' is not a hex digit
     const result = parseEmailDomain(`user@${nonHex}.quincemail.com`)
-    expect(result).not.toBeNull()
-    expect(result!.alias).toBe(nonHex)
-    expect(result!.publicKey).toBeUndefined()
+    assert.notStrictEqual(result, null)
+    assert.strictEqual(result!.alias, nonHex)
+    assert.strictEqual(result!.publicKey, undefined)
   })
 })
 
@@ -141,82 +142,82 @@ describe('parseEmailDomain — legacy/bare domain (no subdomain)', () => {
     // subdomain before quincemail.com.  Bare domain has no subdomain → null.
     // Legacy gateway addressing would need its own parser on top of this.
     const result = parseEmailDomain('alice@quincemail.com')
-    expect(result).toBeNull()
+    assert.strictEqual(result, null)
   })
 })
 
 describe('parseEmailDomain — invalid addresses', () => {
   test('returns null for empty string', () => {
-    expect(parseEmailDomain('')).toBeNull()
+    assert.strictEqual(parseEmailDomain(''), null)
   })
 
   test('returns null for wrong domain', () => {
-    expect(parseEmailDomain('alice@gmail.com')).toBeNull()
+    assert.strictEqual(parseEmailDomain('alice@gmail.com'), null)
   })
 
   test('returns null for address with no @', () => {
-    expect(parseEmailDomain('notanemail')).toBeNull()
+    assert.strictEqual(parseEmailDomain('notanemail'), null)
   })
 
   test('returns null for deep-nested subdomains (two levels)', () => {
     // extra.PUBKEY.quincemail.com → regex does not match
     const result = parseEmailDomain(`alice@extra.${PUBKEY}.quincemail.com`)
-    expect(result).toBeNull()
+    assert.strictEqual(result, null)
   })
 
   test('returns null when username is empty (@ at start)', () => {
     // match[1] would be '' which is falsy → null
     const result = parseEmailDomain(`@${PUBKEY}.quincemail.com`)
-    expect(result).toBeNull()
+    assert.strictEqual(result, null)
   })
 
   test('throws TypeError for null input (no null guard in implementation)', () => {
-    expect(() => parseEmailDomain(null as unknown as string)).toThrow(TypeError)
+    assert.throws(() => parseEmailDomain(null as unknown as string), TypeError)
   })
 })
 
 describe('getEmailAddress', () => {
   test('constructs canonical email from username and pubkey', () => {
     const addr = getEmailAddress('alice', PUBKEY)
-    expect(addr).toBe(`alice@${PUBKEY}.quincemail.com`)
+    assert.strictEqual(addr, `alice@${PUBKEY}.quincemail.com`)
   })
 
   test('normalises pubkey to lowercase', () => {
     const addr = getEmailAddress('alice', PUBKEY_UPPER)
-    expect(addr).toBe(`alice@${PUBKEY_UPPER.toLowerCase()}.quincemail.com`)
+    assert.strictEqual(addr, `alice@${PUBKEY_UPPER.toLowerCase()}.quincemail.com`)
   })
 
   test('round-trips through parseEmailDomain', () => {
     const addr = getEmailAddress('bob', PUBKEY)
     const parsed = parseEmailDomain(addr)
-    expect(parsed).not.toBeNull()
-    expect(parsed!.username).toBe('bob')
-    expect(parsed!.publicKey).toBe(PUBKEY)
+    assert.notStrictEqual(parsed, null)
+    assert.strictEqual(parsed!.username, 'bob')
+    assert.strictEqual(parsed!.publicKey, PUBKEY)
   })
 })
 
 describe('validatePublicKey', () => {
   test('accepts valid 64-char lowercase hex', () => {
-    expect(validatePublicKey(PUBKEY)).toBeNull()
+    assert.strictEqual(validatePublicKey(PUBKEY), null)
   })
 
   test('accepts valid 64-char uppercase hex', () => {
-    expect(validatePublicKey(PUBKEY_UPPER)).toBeNull()
+    assert.strictEqual(validatePublicKey(PUBKEY_UPPER), null)
   })
 
   test('rejects empty string', () => {
-    expect(validatePublicKey('')).not.toBeNull()
+    assert.notStrictEqual(validatePublicKey(''), null)
   })
 
   test('rejects 63-char hex (too short)', () => {
-    expect(validatePublicKey('a'.repeat(63))).not.toBeNull()
+    assert.notStrictEqual(validatePublicKey('a'.repeat(63)), null)
   })
 
   test('rejects 65-char hex (too long)', () => {
-    expect(validatePublicKey('a'.repeat(65))).not.toBeNull()
+    assert.notStrictEqual(validatePublicKey('a'.repeat(65)), null)
   })
 
   test('rejects non-hex characters', () => {
-    expect(validatePublicKey('g'.repeat(64))).not.toBeNull()
+    assert.notStrictEqual(validatePublicKey('g'.repeat(64)), null)
   })
 })

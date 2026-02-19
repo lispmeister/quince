@@ -1,4 +1,5 @@
-import { test, expect, describe, beforeEach, afterEach } from 'bun:test'
+import { test, describe, beforeEach, afterEach } from 'node:test'
+import assert from 'node:assert'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -161,48 +162,48 @@ describe('gate storage', () => {
     storeGateMessage(testDir, 'gate-001', MIME, 'stranger@gmail.com', PAYMENT)
 
     const files = fs.readdirSync(testDir).filter((f: string) => f.endsWith('.eml'))
-    expect(files).toHaveLength(1)
-    expect(files[0]).toContain('gate-001.eml')
+    assert.strictEqual(files.length, 1)
+    assert.ok(files[0].includes('gate-001.eml'))
 
     const content = fs.readFileSync(path.join(testDir, files[0]!), 'utf8')
-    expect(content).toBe(MIME)
+    assert.strictEqual(content, MIME)
   })
 
   test('extracts metadata into index', () => {
     storeGateMessage(testDir, 'gate-002', MIME, 'stranger@gmail.com', PAYMENT)
 
     const messages = loadIndex(testDir)
-    expect(messages).toHaveLength(1)
-    expect(messages[0]!.id).toBe('gate-002')
-    expect(messages[0]!.from).toBe('stranger@gmail.com')
-    expect(messages[0]!.to).toBe('alice@quincemail.com')
-    expect(messages[0]!.subject).toBe('Hello from the outside')
-    expect(messages[0]!.senderEmail).toBe('stranger@gmail.com')
-    expect(messages[0]!.contentType).toBe('text/plain')
-    expect(messages[0]!.messageId).toBe('<abc123@gmail.com>')
-    expect(messages[0]!.status).toBe('pending')
+    assert.strictEqual(messages.length, 1)
+    assert.strictEqual(messages[0]!.id, 'gate-002')
+    assert.strictEqual(messages[0]!.from, 'stranger@gmail.com')
+    assert.strictEqual(messages[0]!.to, 'alice@quincemail.com')
+    assert.strictEqual(messages[0]!.subject, 'Hello from the outside')
+    assert.strictEqual(messages[0]!.senderEmail, 'stranger@gmail.com')
+    assert.strictEqual(messages[0]!.contentType, 'text/plain')
+    assert.strictEqual(messages[0]!.messageId, '<abc123@gmail.com>')
+    assert.strictEqual(messages[0]!.status, 'pending')
   })
 
   test('stores payment info', () => {
     storeGateMessage(testDir, 'gate-003', MIME, 'stranger@gmail.com', PAYMENT)
 
     const messages = loadIndex(testDir)
-    expect(messages[0]!.payment).toEqual(PAYMENT)
+    assert.deepStrictEqual(messages[0]!.payment, PAYMENT)
   })
 
   test('default status is pending', () => {
     storeGateMessage(testDir, 'gate-004', MIME, 'stranger@gmail.com', PAYMENT)
 
     const messages = loadIndex(testDir)
-    expect(messages[0]!.status).toBe('pending')
+    assert.strictEqual(messages[0]!.status, 'pending')
   })
 
   test('omits optional headers when not present', () => {
     storeGateMessage(testDir, 'gate-005', MIME_MINIMAL, 'other@example.com', PAYMENT)
 
     const messages = loadIndex(testDir)
-    expect(messages[0]!.contentType).toBeUndefined()
-    expect(messages[0]!.messageId).toBeUndefined()
+    assert.strictEqual(messages[0]!.contentType, undefined)
+    assert.strictEqual(messages[0]!.messageId, undefined)
   })
 
   test('appends multiple messages to index', () => {
@@ -210,14 +211,14 @@ describe('gate storage', () => {
     storeGateMessage(testDir, 'gate-b', MIME_MINIMAL, 'other@example.com', PAYMENT)
 
     const messages = loadIndex(testDir)
-    expect(messages).toHaveLength(2)
-    expect(messages[0]!.id).toBe('gate-a')
-    expect(messages[1]!.id).toBe('gate-b')
+    assert.strictEqual(messages.length, 2)
+    assert.strictEqual(messages[0]!.id, 'gate-a')
+    assert.strictEqual(messages[1]!.id, 'gate-b')
   })
 
   test('empty gate returns empty list', () => {
     const messages = loadIndex(testDir)
-    expect(messages).toHaveLength(0)
+    assert.strictEqual(messages.length, 0)
   })
 })
 
@@ -226,20 +227,20 @@ describe('gate get', () => {
     storeGateMessage(testDir, 'find-me', MIME, 'stranger@gmail.com', PAYMENT)
 
     const entry = getGateMessage(testDir, 'find-me')
-    expect(entry).not.toBeNull()
-    expect(entry!.id).toBe('find-me')
+    assert.notStrictEqual(entry, null)
+    assert.strictEqual(entry!.id, 'find-me')
   })
 
   test('getGateMessage returns null for missing id', () => {
     const entry = getGateMessage(testDir, 'nonexistent')
-    expect(entry).toBeNull()
+    assert.strictEqual(entry, null)
   })
 
   test('getGateMessageContent reads .eml file', () => {
     const entry = storeGateMessage(testDir, 'content-test', MIME, 'stranger@gmail.com', PAYMENT)
 
     const content = getGateMessageContent(testDir, entry)
-    expect(content).toBe(MIME)
+    assert.strictEqual(content, MIME)
   })
 })
 
@@ -251,12 +252,12 @@ describe('gate delete', () => {
     deleteGateMessage(testDir, entry)
 
     const messages = loadIndex(testDir)
-    expect(messages).toHaveLength(1)
-    expect(messages[0]!.id).toBe('keep-me')
+    assert.strictEqual(messages.length, 1)
+    assert.strictEqual(messages[0]!.id, 'keep-me')
 
     const files = fs.readdirSync(testDir).filter((f: string) => f.endsWith('.eml'))
-    expect(files).toHaveLength(1)
-    expect(files[0]).toContain('keep-me')
+    assert.strictEqual(files.length, 1)
+    assert.ok(files[0].includes('keep-me'))
   })
 })
 
@@ -265,24 +266,24 @@ describe('gate status update', () => {
     storeGateMessage(testDir, 'status-test', MIME, 'stranger@gmail.com', PAYMENT)
 
     const updated = updateGateMessageStatus(testDir, 'status-test', 'accepted')
-    expect(updated).not.toBeNull()
-    expect(updated!.status).toBe('accepted')
+    assert.notStrictEqual(updated, null)
+    assert.strictEqual(updated!.status, 'accepted')
 
     // Verify persisted
     const entry = getGateMessage(testDir, 'status-test')
-    expect(entry!.status).toBe('accepted')
+    assert.strictEqual(entry!.status, 'accepted')
   })
 
   test('updates status to rejected', () => {
     storeGateMessage(testDir, 'reject-test', MIME, 'stranger@gmail.com', PAYMENT)
 
     const updated = updateGateMessageStatus(testDir, 'reject-test', 'rejected')
-    expect(updated!.status).toBe('rejected')
+    assert.strictEqual(updated!.status, 'rejected')
   })
 
   test('returns null for missing id', () => {
     const result = updateGateMessageStatus(testDir, 'nonexistent', 'accepted')
-    expect(result).toBeNull()
+    assert.strictEqual(result, null)
   })
 
   test('filtering by status works on loaded index', () => {
@@ -298,11 +299,11 @@ describe('gate status update', () => {
     const accepted = all.filter(e => e.status === 'accepted')
     const rejected = all.filter(e => e.status === 'rejected')
 
-    expect(pending).toHaveLength(1)
-    expect(pending[0]!.id).toBe('p2')
-    expect(accepted).toHaveLength(1)
-    expect(accepted[0]!.id).toBe('p1')
-    expect(rejected).toHaveLength(1)
-    expect(rejected[0]!.id).toBe('p3')
+    assert.strictEqual(pending.length, 1)
+    assert.strictEqual(pending[0]!.id, 'p2')
+    assert.strictEqual(accepted.length, 1)
+    assert.strictEqual(accepted[0]!.id, 'p1')
+    assert.strictEqual(rejected.length, 1)
+    assert.strictEqual(rejected[0]!.id, 'p3')
   })
 })

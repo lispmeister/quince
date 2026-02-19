@@ -1,5 +1,6 @@
-import { test, expect, describe } from 'bun:test'
-import { SmtpSession } from '../src/smtp/session.js'
+import { test, describe } from 'node:test'
+import assert from 'node:assert'
+import { SmtpSession } from '../dist/smtp/session.js'
 
 function createSession(onMessage: (from: string, to: string, data: string) => Promise<void>) {
   return new SmtpSession({
@@ -38,8 +39,8 @@ describe('SMTP DATA separator', () => {
     // Wait for async onMessage
     await new Promise(resolve => setTimeout(resolve, 10))
 
-    expect(captured).toContain('\r\n')
-    expect(captured).not.toMatch(/[^\r]\n/)  // no bare \n without preceding \r
+    assert.ok(captured.includes('\r\n'))
+    assert.ok(!/[^\r]\n/.test(captured))  // no bare \n without preceding \r
   })
 
   test('full message has CRLF header/body separator', async () => {
@@ -60,15 +61,15 @@ describe('SMTP DATA separator', () => {
     await new Promise(resolve => setTimeout(resolve, 10))
 
     // The header/body separator must be \r\n\r\n
-    expect(captured).toContain('\r\n\r\n')
+    assert.ok(captured.includes('\r\n\r\n'))
 
     const sepIndex = captured.indexOf('\r\n\r\n')
     const headers = captured.slice(0, sepIndex)
     const body = captured.slice(sepIndex + 4)
 
-    expect(headers).toContain('From: alice@alice.quincemail.com')
-    expect(headers).toContain('Subject: Hello')
-    expect(body).toBe('Body text')
+    assert.ok(headers.includes('From: alice@alice.quincemail.com'))
+    assert.ok(headers.includes('Subject: Hello'))
+    assert.strictEqual(body, 'Body text')
   })
 
   test('malformed message without blank line has no CRLF separator', async () => {
@@ -92,7 +93,7 @@ describe('SMTP DATA separator', () => {
     // (From + To headers run straight into the data content)
     // This is a malformed MIME message — crypto.ts should handle it gracefully
     const hasSeparator = captured.includes('\r\n\r\n')
-    expect(hasSeparator).toBe(false)
+    assert.strictEqual(hasSeparator, false)
   })
 })
 
@@ -101,16 +102,16 @@ describe('SMTP EHLO extensions', () => {
     const session = createSession(async () => {})
     const resp = session.processLine('EHLO client.test')
 
-    expect(resp).toContain('250-')
-    expect(resp).toContain('SIZE')
-    expect(resp).toContain('8BITMIME')
+    assert.ok(resp.includes('250-'))
+    assert.ok(resp.includes('SIZE'))
+    assert.ok(resp.includes('8BITMIME'))
   })
 
   test('HELO does not advertise extensions', () => {
     const session = createSession(async () => {})
     const resp = session.processLine('HELO client.test')
 
-    expect(resp).not.toContain('SIZE')
-    expect(resp).not.toContain('8BITMIME')
+    assert.ok(!resp.includes('SIZE'))
+    assert.ok(!resp.includes('8BITMIME'))
   })
 })
