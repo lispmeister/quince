@@ -119,6 +119,23 @@ export function validateConfig(config: unknown): ConfigValidationError[] {
     }
   }
 
+  if (c.directory !== undefined) {
+    if (typeof c.directory !== 'object' || c.directory === null || Array.isArray(c.directory)) {
+      errors.push({ field: 'directory', message: 'directory must be an object' })
+    } else {
+      const dir = c.directory as Record<string, unknown>
+      if (dir.url !== undefined && (typeof dir.url !== 'string' || dir.url.length === 0)) {
+        errors.push({ field: 'directory.url', message: 'directory.url must be a non-empty string' })
+      }
+      if (dir.autoLookup !== undefined && typeof dir.autoLookup !== 'boolean') {
+        errors.push({ field: 'directory.autoLookup', message: 'directory.autoLookup must be a boolean' })
+      }
+      if (dir.listed !== undefined && typeof dir.listed !== 'boolean') {
+        errors.push({ field: 'directory.listed', message: 'directory.listed must be a boolean' })
+      }
+    }
+  }
+
   return errors
 }
 
@@ -175,6 +192,23 @@ export function loadConfig(): Config {
           }
           if (Object.keys(validTrust).length > 0) {
             config.trustIntroductions = validTrust
+          }
+        }
+        // Keep valid directory settings
+        if (typeof parsed.directory === 'object' && parsed.directory !== null && !Array.isArray(parsed.directory)) {
+          const dir = parsed.directory as Record<string, unknown>
+          const validDir: Config['directory'] = {}
+          if (typeof dir.url === 'string' && dir.url.length > 0) {
+            validDir.url = dir.url
+          }
+          if (typeof dir.autoLookup === 'boolean') {
+            validDir.autoLookup = dir.autoLookup
+          }
+          if (typeof dir.listed === 'boolean') {
+            validDir.listed = dir.listed
+          }
+          if (Object.keys(validDir).length > 0) {
+            config.directory = validDir
           }
         }
         return config
