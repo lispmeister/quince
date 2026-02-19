@@ -41,3 +41,4 @@ CLAUDE.md
 AGENT.md
 # pear-mail local config (contains room keys)
 .quince/
+*.tar.gz
