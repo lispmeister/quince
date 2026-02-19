@@ -5,7 +5,7 @@
 set -e
 
 INSTALL_DIR="${HOME}/.local/bin"
-QUINCE_VERSION="0.1.0"
+QUINCE_VERSION="0.1.2"
 REPO_URL="https://github.com/lispmeister/quince"
 
 echo "Installing Quince ${QUINCE_VERSION}..."

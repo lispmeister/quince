@@ -4,7 +4,7 @@ set -e
 # Quince installer for OpenClaw
 # Downloads the release tarball from GitHub, installs to ~/.local
 
-QUINCE_VERSION="0.1.1"
+QUINCE_VERSION="0.1.2"
 REPO_URL="https://github.com/lispmeister/quince"
 INSTALL_DIR="${HOME}/.local/lib/quince"
 BIN_DIR="${HOME}/.local/bin"

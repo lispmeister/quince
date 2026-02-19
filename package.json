@@ -1,6 +1,6 @@
 {
   "name": "quince",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "engines": { "node": ">=22.12.0" },
   "main": "dist/index.js",
