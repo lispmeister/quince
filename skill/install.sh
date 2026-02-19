@@ -2,58 +2,68 @@
 set -e
 
 # Quince installer for OpenClaw
-# Installs quince to $HOME/.local/bin
+# Downloads the release tarball from GitHub, installs to ~/.local
 
-INSTALL_DIR="${HOME}/.local/bin"
-QUINCE_VERSION="0.1.0"
+QUINCE_VERSION="0.1.1"
+REPO_URL="https://github.com/lispmeister/quince"
+INSTALL_DIR="${HOME}/.local/lib/quince"
+BIN_DIR="${HOME}/.local/bin"
 
 echo "Installing Quince ${QUINCE_VERSION}..."
 
-# Check Node.js version
+# Check Node.js version (>=22.12 required for OpenClaw compatibility)
 if ! command -v node &> /dev/null; then
     echo "Error: Node.js is required but not installed"
     exit 1
 fi
 
-NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_VERSION" -lt 22 ]; then
-    echo "Error: Node.js 22+ required (found $(node --version))"
+NODE_MAJOR=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
+NODE_MINOR=$(node --version | cut -d'v' -f2 | cut -d'.' -f2)
+if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 12 ]; }; then
+    echo "Error: Node.js 22.12+ required (found $(node --version))"
     exit 1
 fi
 
-# Create install directory
-mkdir -p "$INSTALL_DIR"
+# Download and extract release tarball
+echo "Downloading quince v${QUINCE_VERSION}..."
+cd /tmp
+rm -rf quince-install
+mkdir quince-install
+cd quince-install
 
-# Build and install quince locally
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$PROJECT_DIR"
+TARBALL_URL="${REPO_URL}/releases/download/v${QUINCE_VERSION}/quince-v${QUINCE_VERSION}.tar.gz"
+if ! curl -fsSL "$TARBALL_URL" | tar -xz; then
+    echo "Error: Failed to download release from $TARBALL_URL"
+    echo "Check that the release exists: ${REPO_URL}/releases/tag/v${QUINCE_VERSION}"
+    exit 1
+fi
 
-echo "Building quince..."
-npm run build > /dev/null 2>&1
+# Install to ~/.local/lib/quince (preserves bin/dist relative structure)
+rm -rf "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR" "$BIN_DIR"
+cp -r quince-v${QUINCE_VERSION}/* "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/bin/quince"
 
-# Copy binary
-cp bin/quince "$INSTALL_DIR/quince"
-chmod +x "$INSTALL_DIR/quince"
+# Symlink into PATH
+ln -sf "$INSTALL_DIR/bin/quince" "$BIN_DIR/quince"
 
-# Copy compiled dist
-cp -r dist "$INSTALL_DIR/quince-dist"
+# Install npm dependencies (needed for hyperswarm etc.)
+cd "$INSTALL_DIR"
+npm install --omit=dev --silent 2>/dev/null
 
-# Update binary to point to local dist
-sed -i.bak "s|\"$PROJECT_DIR/dist/index.js\"|\"$INSTALL_DIR/quince-dist/index.js\"|g" "$INSTALL_DIR/quince"
-rm "$INSTALL_DIR/quince.bak"
+# Cleanup
+rm -rf /tmp/quince-install
 
-echo "Quince installed to $INSTALL_DIR/quince"
-
-# Initialize if needed
+# Initialize identity if needed
 if [ ! -f ~/.quince/id ]; then
     echo "Generating identity..."
-    "$INSTALL_DIR/quince" init
+    "$BIN_DIR/quince" init
 fi
 
 # Register with directory
 PUBKEY=$(cat ~/.quince/id_pub 2>/dev/null || echo "")
 if [ -n "$PUBKEY" ]; then
-    USERNAME=$(jq -r '.username // "agent"' ~/.quince/config.json 2>/dev/null || echo "agent")
+    USERNAME=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$HOME/.quince/config.json','utf8')).username||'agent')}catch{console.log('agent')}" 2>/dev/null || echo "agent")
     echo "Registering with directory..."
     curl -sf -X POST https://quincemail.com/api/directory/register \
       -H 'Content-Type: application/json' \
@@ -61,9 +71,9 @@ if [ -n "$PUBKEY" ]; then
 fi
 
 echo ""
-echo "Quince installed successfully!"
-echo "Public key: $PUBKEY"
-echo "Email: $USERNAME@quincemail.com"
+echo "Quince ${QUINCE_VERSION} installed successfully!"
+echo "Public key: ${PUBKEY}"
+echo "Email: ${USERNAME:-agent}@quincemail.com"
 echo ""
-echo "Start the daemon with: $INSTALL_DIR/quince start &"
-echo "Make sure $INSTALL_DIR is in your PATH"
+echo "Start the daemon: quince start &"
+echo "Make sure ${BIN_DIR} is in your PATH"

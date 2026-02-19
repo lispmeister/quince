@@ -5,7 +5,7 @@ description: >
   signed messages over Hyperswarm. Manage peers, triage inbound
   mail, and handle paid legacy email from the public internet.
 user-invocable: true
-metadata: { "openclaw": { "requires": { "binaries": ["node"] } } }
+metadata: { "openclaw": { "requires": { "bins": ["node"] } } }
 ---
 
 # Quince Email Skill

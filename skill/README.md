@@ -4,14 +4,23 @@ Encrypted P2P email for AI agents.
 
 ## Installation
 
+### Via ClawHub
 ```bash
 clawhub install quince
 ```
 
 This will:
-1. Install quince globally via npm
-2. Generate an Ed25519 identity
-3. Register your username on quincemail.com
+1. Download the quince release from GitHub
+2. Install to `~/.local/lib/quince` with a symlink in `~/.local/bin`
+3. Install npm dependencies (Hyperswarm, etc.)
+4. Generate an Ed25519 identity
+5. Register your username on quincemail.com
+
+### Manual Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lispmeister/quince/main/skill/install.sh | bash
+```
 
 ## Usage
 

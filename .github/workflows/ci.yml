@@ -62,7 +62,7 @@ jobs:
     - name: Create release tarball
       run: |
         mkdir -p quince-${{ github.ref_name }}
-        cp -r bin dist package.json README.md LICENSE quince-${{ github.ref_name }}/
+        cp -r bin dist package.json package-lock.json README.md LICENSE quince-${{ github.ref_name }}/
         tar -czf quince-${{ github.ref_name }}.tar.gz quince-${{ github.ref_name }}/
     
     - name: Upload to GitHub Releases
