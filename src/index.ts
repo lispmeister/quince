@@ -30,6 +30,9 @@ import {
 } from './identity.js'
 import { signMessage, verifyMessage, signIntroduction, verifyIntroduction } from './crypto.js'
 import { storeMessage, listMessages, getMessage, getMessageContent, deleteMessage, getInboxPath } from './inbox.js'
+import { listGateMessages, getGateMessage, getGateMessageContent, deleteGateMessage, updateGateMessageStatus } from './gate.js'
+import { loadRules, addRule, updateRule, removeRule, reorderRules } from './gate-rules.js'
+import { addWhitelistRule } from './whitelist.js'
 import { Pop3Server } from './pop3/index.js'
 import { HttpServer } from './http/index.js'
 import type { HttpContext } from './http/index.js'
@@ -48,6 +51,7 @@ import {
 } from './introductions.js'
 import type { PeerIntroduction, PeerStatus } from './transport/index.js'
 import { guessContentType } from './http/handlers.js'
+import { lookupUsername } from './directory.js'
 
 let config = loadConfig()
 const identity = loadIdentity()
@@ -69,6 +73,7 @@ Usage:
 
 Commands:
   start                         Start the daemon
+  init                          Initialize identity and config (no daemon)
   identity                      Show your identity and email address
   peers                         List configured peers
   add-peer <alias> <pubkey>     Add a peer with friendly alias
@@ -108,6 +113,28 @@ async function showIdentity(): Promise<void> {
   console.log('')
   console.log('Share your email address with correspondents.')
   console.log(`They can send mail to: ${emailAddr}`)
+}
+
+async function handleInit(): Promise<void> {
+  // ensureConfigDir + loadIdentity already ran at module top-level (lines 52-53)
+  // Just make sure a config.json exists on disk
+  const configPath = getConfigPath()
+  if (!fs.existsSync(configPath)) {
+    if (!saveConfig(config)) {
+      console.error('Error: Failed to create default config')
+      process.exit(1)
+    }
+  }
+
+  const emailAddr = getEmailAddress(LOCAL_USER, identity.publicKey)
+  console.log('Quince initialized.')
+  console.log('')
+  console.log(`  Public key:    ${identity.publicKey}`)
+  console.log(`  Email address: ${emailAddr}`)
+  console.log(`  Config:        ${configPath}`)
+  console.log(`  Private key:   ${getIdentityPath()}`)
+  console.log('')
+  console.log('Run "quince start" to start the daemon.')
 }
 
 async function showPeers(): Promise<void> {
@@ -340,8 +367,8 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
-// Resolve recipient address to pubkey
-function resolveRecipient(to: string): { pubkey: string; display: string } | null {
+// Resolve recipient address to pubkey, with optional directory auto-lookup
+async function resolveRecipient(to: string, whitelist?: Set<string>): Promise<{ pubkey: string; display: string } | null> {
   const parsed = parseEmailDomain(to)
   if (!parsed) {
     console.error(`Invalid recipient address format: ${to}`)
@@ -361,15 +388,32 @@ function resolveRecipient(to: string): { pubkey: string; display: string } | nul
   // Alias lookup
   if (parsed.alias) {
     const pubkey = getPeerPubkey(config, parsed.alias)
-    if (!pubkey) {
-      console.error(`Unknown peer alias: ${parsed.alias}`)
-      console.error('Add peer with: quince add-peer <alias> <pubkey>')
-      return null
+    if (pubkey) {
+      return {
+        pubkey,
+        display: parsed.alias
+      }
     }
-    return {
-      pubkey,
-      display: parsed.alias
+
+    // Not a known alias — try directory auto-lookup if enabled
+    if (config.directory?.autoLookup !== false) {
+      console.log(`Unknown alias '${parsed.alias}', querying directory...`)
+      const entry = await lookupUsername(parsed.alias, config.directory?.url)
+      if (entry) {
+        console.log(`Directory resolved '${parsed.alias}' -> ${entry.pubkey.slice(0, 16)}...`)
+        config = addPeer(config, parsed.alias, entry.pubkey)
+        saveConfig(config)
+        whitelist?.add(entry.pubkey.toLowerCase())
+        return {
+          pubkey: entry.pubkey,
+          display: parsed.alias
+        }
+      }
     }
+
+    console.error(`Unknown peer alias: ${parsed.alias}`)
+    console.error('Add peer with: quince add-peer <alias> <pubkey>')
+    return null
   }
 
   return null
@@ -735,7 +779,7 @@ async function startDaemon(): Promise<void> {
   ): Promise<{ id: string; queued: boolean; messageId: string }> {
     const fromAddr = getEmailAddress(LOCAL_USER, identity.publicKey)
 
-    const recipient = resolveRecipient(to)
+    const recipient = await resolveRecipient(to, whitelist)
     if (!recipient) {
       throw new Error(`Invalid recipient address: ${to}`)
     }
@@ -782,7 +826,7 @@ async function startDaemon(): Promise<void> {
     console.log(`From: ${from}`)
     console.log(`To: ${to}`)
 
-    const recipient = resolveRecipient(to)
+    const recipient = await resolveRecipient(to, whitelist)
     if (!recipient) {
       return
     }
@@ -924,7 +968,31 @@ async function startDaemon(): Promise<void> {
       return intro
     },
     rejectIntroduction: (pubkey: string) => rejectIntro(pubkey),
-    signIntroduction: (introduced: Record<string, unknown>) => signIntroduction(introduced, identity.secretKey)
+    signIntroduction: (introduced: Record<string, unknown>) => signIntroduction(introduced, identity.secretKey),
+    addPeerToConfig: (alias: string, pubkey: string) => {
+      config = addPeer(config, alias, pubkey)
+      if (!saveConfig(config)) {
+        return { success: false, error: 'Failed to save config' }
+      }
+      whitelist.add(pubkey.toLowerCase())
+      transport.connectToPeer(pubkey).catch(err => {
+        console.error(`Failed to connect to new peer: ${err}`)
+      })
+      return { success: true }
+    },
+    listGateMessages,
+    getGateMessage,
+    getGateMessageContent,
+    deleteGateMessage,
+    updateGateMessageStatus,
+    storeMessage,
+    addWhitelistRule,
+    listGateRules: loadRules,
+    addGateRule: addRule,
+    getGateRule: (id: string) => loadRules().find(r => r.id === id),
+    updateGateRule: updateRule,
+    removeGateRule: removeRule,
+    reorderGateRules: reorderRules,
   }
 
   const httpServer = new HttpServer({
@@ -1087,6 +1155,10 @@ async function main(): Promise<void> {
         process.exit(1)
       }
       await handleAcceptIntroduction(args[1])
+      break
+
+    case 'init':
+      await handleInit()
       break
 
     case 'help':

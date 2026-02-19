@@ -10,6 +10,11 @@ export interface Config {
   httpPort?: number
   peers?: Record<string, string>  // alias -> pubkey
   trustIntroductions?: Record<string, boolean>  // alias -> whether to auto-accept their introductions
+  directory?: {
+    url?: string          // default: 'https://quincemail.com'
+    autoLookup?: boolean  // default: true
+    listed?: boolean      // default: true
+  }
 }
 
 export interface ConfigValidationError {

@@ -2,11 +2,14 @@ import type { HttpRequest, HttpResponse } from './parser.js'
 import { jsonResponse, errorResponse } from './parser.js'
 import type { RouteParams } from './router.js'
 import type { InboxEntry } from '../inbox.js'
+import type { GateEntry } from '../gate.js'
+import type { WhitelistRule } from '../whitelist.js'
 import type { Config } from '../config.js'
 import type { Identity } from '../identity.js'
 import type { Transport, PeerCapabilities } from '../transport/index.js'
 import type { FileTransferManager } from '../transfer/index.js'
 import type { FileTransfer } from '../transfer/types.js'
+import type { RuleAction, RuleConditions, GateRule } from '../gate-rules.js'
 
 export interface StoredIntroductionView {
   pubkey: string
@@ -37,6 +40,20 @@ export interface HttpContext {
   acceptIntroduction: (pubkey: string) => StoredIntroductionView | null
   rejectIntroduction: (pubkey: string) => StoredIntroductionView | null
   signIntroduction: (introduced: Record<string, unknown>) => string
+  addPeerToConfig: (alias: string, pubkey: string) => { success: boolean; error?: string }
+  listGateMessages: () => GateEntry[]
+  getGateMessage: (id: string) => GateEntry | null
+  getGateMessageContent: (entry: GateEntry) => string | null
+  deleteGateMessage: (entry: GateEntry) => void
+  updateGateMessageStatus: (id: string, status: 'pending' | 'accepted' | 'rejected') => GateEntry | null
+  storeMessage: (id: string, mime: string, senderPubkey: string, signatureValid: boolean) => InboxEntry
+  addWhitelistRule: (type: WhitelistRule['type'], value: string) => WhitelistRule
+  listGateRules: () => GateRule[]
+  addGateRule: (action: RuleAction, conditions: RuleConditions) => GateRule
+  getGateRule: (id: string) => GateRule | undefined
+  updateGateRule: (id: string, action: RuleAction, conditions: RuleConditions) => GateRule | null
+  removeGateRule: (id: string) => boolean
+  reorderGateRules: (ids: string[]) => GateRule[]
 }
 
 // --- Inbox handlers ---
@@ -136,6 +153,122 @@ export function handleDeleteMessage(_req: HttpRequest, params: RouteParams, ctx:
 
   ctx.deleteMessage(entry)
   return jsonResponse({ deleted: true, id: entry.id })
+}
+
+// --- Gate inbox handlers ---
+
+export function handleListGateMessages(req: HttpRequest, _params: RouteParams, ctx: HttpContext): HttpResponse {
+  let messages = ctx.listGateMessages()
+
+  // Filters
+  const { status, from, after, subject, q, limit, offset } = req.query
+
+  if (status) {
+    messages = messages.filter(m => m.status === status)
+  }
+  if (from) {
+    messages = messages.filter(m => m.senderEmail === from || m.from.includes(from))
+  }
+  if (after) {
+    const ts = parseInt(after, 10)
+    if (!isNaN(ts)) {
+      messages = messages.filter(m => m.receivedAt > ts)
+    }
+  }
+  if (subject) {
+    const lower = subject.toLowerCase()
+    messages = messages.filter(m => m.subject.toLowerCase().includes(lower))
+  }
+  if (q) {
+    const lower = q.toLowerCase()
+    messages = messages.filter(m => {
+      if (m.subject.toLowerCase().includes(lower)) return true
+      if (m.from.toLowerCase().includes(lower)) return true
+      if (m.senderEmail.toLowerCase().includes(lower)) return true
+      const content = ctx.getGateMessageContent(m)
+      if (content && content.toLowerCase().includes(lower)) return true
+      return false
+    })
+  }
+
+  // Pagination
+  const off = offset ? parseInt(offset, 10) : 0
+  const lim = limit ? parseInt(limit, 10) : 50
+
+  const total = messages.length
+  if (off > 0) messages = messages.slice(off)
+  messages = messages.slice(0, lim)
+
+  return jsonResponse({
+    messages: messages.map(summarizeGateEntry),
+    total,
+    offset: off,
+    limit: lim
+  })
+}
+
+export function handleGetGateMessage(_req: HttpRequest, params: RouteParams, ctx: HttpContext): HttpResponse {
+  const entry = ctx.getGateMessage(params['id']!)
+  if (!entry) return errorResponse(404, 'Message not found')
+
+  const content = ctx.getGateMessageContent(entry)
+  return jsonResponse({
+    ...entry,
+    body: content
+  })
+}
+
+export function handleGetGateRawMessage(_req: HttpRequest, params: RouteParams, ctx: HttpContext): HttpResponse {
+  const entry = ctx.getGateMessage(params['id']!)
+  if (!entry) return errorResponse(404, 'Message not found')
+
+  const content = ctx.getGateMessageContent(entry)
+  if (!content) return errorResponse(404, 'Message file not found')
+
+  return {
+    status: 200,
+    statusText: 'OK',
+    headers: {
+      'content-type': 'message/rfc822',
+      'content-disposition': `inline; filename="${entry.file}"`
+    },
+    body: content
+  }
+}
+
+export function handleDeleteGateMessage(_req: HttpRequest, params: RouteParams, ctx: HttpContext): HttpResponse {
+  const entry = ctx.getGateMessage(params['id']!)
+  if (!entry) return errorResponse(404, 'Message not found')
+
+  ctx.deleteGateMessage(entry)
+  return jsonResponse({ deleted: true, id: entry.id })
+}
+
+export function handleAcceptGateMessage(_req: HttpRequest, params: RouteParams, ctx: HttpContext): HttpResponse {
+  const id = params['id']!
+  const entry = ctx.getGateMessage(id)
+  if (!entry) return errorResponse(404, 'Gate message not found')
+
+  ctx.updateGateMessageStatus(id, 'accepted')
+
+  const content = ctx.getGateMessageContent(entry)
+  if (content) {
+    ctx.storeMessage(id, content, 'legacy-gateway', false)
+  }
+
+  ctx.addWhitelistRule('address', entry.senderEmail)
+
+  return jsonResponse({ accepted: true, id, senderWhitelisted: true })
+}
+
+export function handleRejectGateMessage(_req: HttpRequest, params: RouteParams, ctx: HttpContext): HttpResponse {
+  const id = params['id']!
+  const entry = ctx.getGateMessage(id)
+  if (!entry) return errorResponse(404, 'Gate message not found')
+
+  ctx.updateGateMessageStatus(id, 'rejected')
+
+  return jsonResponse({ rejected: true, id })
 }
 
 // --- Send handler ---
@@ -279,6 +412,21 @@ export function handleMedia(_req: HttpRequest, params: RouteParams, ctx: HttpCon
 
 // --- Helpers ---
 
+function summarizeGateEntry(e: GateEntry): Record<string, unknown> {
+  return {
+    id: e.id,
+    from: e.from,
+    to: e.to,
+    subject: e.subject,
+    senderEmail: e.senderEmail,
+    receivedAt: e.receivedAt,
+    contentType: e.contentType,
+    messageId: e.messageId,
+    payment: e.payment,
+    status: e.status
+  }
+}
+
 function summarizeEntry(e: InboxEntry): Record<string, unknown> {
   return {
     id: e.id,
@@ -348,6 +496,44 @@ export function handleSendIntroduction(req: HttpRequest, params: RouteParams, ct
   return jsonResponse({ sent: true, introduced, signature })
 }
 
+// --- Add Peer ---
+
+export function handleAddPeer(req: HttpRequest, _params: RouteParams, ctx: HttpContext): HttpResponse {
+  let payload: { alias?: string; pubkey?: string }
+  try {
+    payload = JSON.parse(req.body)
+  } catch {
+    return errorResponse(400, 'Invalid JSON body')
+  }
+
+  if (!payload.alias || typeof payload.alias !== 'string') {
+    return errorResponse(400, 'Missing required field: alias')
+  }
+  if (!payload.pubkey || typeof payload.pubkey !== 'string') {
+    return errorResponse(400, 'Missing required field: pubkey')
+  }
+
+  if (payload.alias.length > 32 || !/^[a-zA-Z0-9._-]+$/.test(payload.alias)) {
+    return errorResponse(400, 'Invalid alias format')
+  }
+
+  if (!/^[a-f0-9]{64}$/i.test(payload.pubkey)) {
+    return errorResponse(400, 'Invalid pubkey: must be 64 hex characters')
+  }
+
+  // Check if alias already exists
+  if (ctx.config.peers?.[payload.alias]) {
+    return errorResponse(409, `Peer alias '${payload.alias}' already exists`)
+  }
+
+  const result = ctx.addPeerToConfig(payload.alias, payload.pubkey)
+  if (!result.success) {
+    return errorResponse(500, result.error ?? 'Failed to add peer')
+  }
+
+  return jsonResponse({ alias: payload.alias, pubkey: payload.pubkey.toLowerCase(), added: true })
+}
+
 export function guessContentType(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase()
   switch (ext) {
@@ -364,4 +550,77 @@ export function guessContentType(filePath: string): string {
     case 'wav': return 'audio/wav'
     default: return 'application/octet-stream'
   }
+}
+
+// --- Gate Rules ---
+
+export function handleListGateRules(_req: HttpRequest, _params: RouteParams, ctx: HttpContext): HttpResponse {
+  const rules = ctx.listGateRules()
+  return jsonResponse({ rules })
+}
+
+export function handleAddGateRule(req: HttpRequest, _params: RouteParams, ctx: HttpContext): HttpResponse {
+  let payload: { action?: RuleAction; conditions?: RuleConditions }
+  try {
+    payload = JSON.parse(req.body)
+  } catch {
+    return errorResponse(400, 'Invalid JSON body')
+  }
+
+  if (!payload.action || (payload.action !== 'accept' && payload.action !== 'reject')) {
+    return errorResponse(400, 'Missing or invalid field: action (must be accept or reject)')
+  }
+  if (!payload.conditions || typeof payload.conditions !== 'object') {
+    return errorResponse(400, 'Missing or invalid field: conditions')
+  }
+
+  const rule = ctx.addGateRule(payload.action, payload.conditions)
+  return jsonResponse({ rule }, 201)
+}
+
+export function handleUpdateGateRule(req: HttpRequest, params: RouteParams, ctx: HttpContext): HttpResponse {
+  const id = params['id']!
+  let payload: { action?: RuleAction; conditions?: RuleConditions }
+  try {
+    payload = JSON.parse(req.body)
+  } catch {
+    return errorResponse(400, 'Invalid JSON body')
+  }
+
+  if (payload.action !== undefined && payload.action !== 'accept' && payload.action !== 'reject') {
+    return errorResponse(400, 'Invalid field: action (must be accept or reject)')
+  }
+
+  // Load existing rule to merge
+  const existing = ctx.getGateRule(id)
+  if (!existing) return errorResponse(404, 'Rule not found')
+
+  const newAction = payload.action ?? existing.action
+  const newConditions = payload.conditions ?? existing.conditions
+  const rule = ctx.updateGateRule(id, newAction, newConditions)
+  if (!rule) return errorResponse(404, 'Rule not found')
+  return jsonResponse({ rule })
+}
+
+export function handleDeleteGateRule(_req: HttpRequest, params: RouteParams, ctx: HttpContext): HttpResponse {
+  const id = params['id']!
+  const deleted = ctx.removeGateRule(id)
+  if (!deleted) return errorResponse(404, 'Rule not found')
+  return jsonResponse({ deleted: true })
+}
+
+export function handleReorderGateRules(req: HttpRequest, _params: RouteParams, ctx: HttpContext): HttpResponse {
+  let payload: { ids?: string[] }
+  try {
+    payload = JSON.parse(req.body)
+  } catch {
+    return errorResponse(400, 'Invalid JSON body')
+  }
+
+  if (!Array.isArray(payload.ids)) {
+    return errorResponse(400, 'Missing or invalid field: ids (must be an array)')
+  }
+
+  const rules = ctx.reorderGateRules(payload.ids)
+  return jsonResponse({ rules })
 }

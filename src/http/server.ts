@@ -17,7 +17,19 @@ import {
   handleListIntroductions,
   handleAcceptIntroduction,
   handleRejectIntroduction,
-  handleSendIntroduction
+  handleSendIntroduction,
+  handleAddPeer,
+  handleListGateMessages,
+  handleGetGateMessage,
+  handleGetGateRawMessage,
+  handleDeleteGateMessage,
+  handleAcceptGateMessage,
+  handleRejectGateMessage,
+  handleListGateRules,
+  handleAddGateRule,
+  handleUpdateGateRule,
+  handleDeleteGateRule,
+  handleReorderGateRules
 } from './handlers.js'
 
 export interface HttpServerConfig {
@@ -51,6 +63,7 @@ export class HttpServer {
     this.router.add('DELETE', '/api/inbox/:id', wrap(handleDeleteMessage))
     this.router.add('POST', '/api/send', wrap(handleSend))
     this.router.add('GET', '/api/peers', wrap(handleListPeers))
+    this.router.add('POST', '/api/peers', wrap(handleAddPeer))
     this.router.add('GET', '/api/peers/:pubkey/status', wrap(handlePeerStatus))
     this.router.add('POST', '/api/peers/:pubkey/introduce', wrap(handleSendIntroduction))
     this.router.add('POST', '/api/status', wrap(handleSetStatus))
@@ -60,6 +73,17 @@ export class HttpServer {
     this.router.add('POST', '/api/introductions/:pubkey/accept', wrap(handleAcceptIntroduction))
     this.router.add('DELETE', '/api/introductions/:pubkey', wrap(handleRejectIntroduction))
     this.router.add('GET', '/media/*', wrap(handleMedia))
+    this.router.add('GET', '/api/gate/rules', wrap(handleListGateRules))
+    this.router.add('POST', '/api/gate/rules/reorder', wrap(handleReorderGateRules))
+    this.router.add('POST', '/api/gate/rules', wrap(handleAddGateRule))
+    this.router.add('PUT', '/api/gate/rules/:id', wrap(handleUpdateGateRule))
+    this.router.add('DELETE', '/api/gate/rules/:id', wrap(handleDeleteGateRule))
+    this.router.add('GET', '/api/gate', wrap(handleListGateMessages))
+    this.router.add('GET', '/api/gate/:id', wrap(handleGetGateMessage))
+    this.router.add('GET', '/api/gate/:id/raw', wrap(handleGetGateRawMessage))
+    this.router.add('DELETE', '/api/gate/:id', wrap(handleDeleteGateMessage))
+    this.router.add('POST', '/api/gate/:id/accept', wrap(handleAcceptGateMessage))
+    this.router.add('POST', '/api/gate/:id/reject', wrap(handleRejectGateMessage))
   }
 
   start(): Promise<number> {

@@ -20,10 +20,38 @@ import {
   handleAcceptIntroduction,
   handleRejectIntroduction,
   handleSendIntroduction,
+  handleAddPeer,
+  handleListGateMessages,
+  handleGetGateMessage,
+  handleGetGateRawMessage,
+  handleDeleteGateMessage,
+  handleAcceptGateMessage,
+  handleRejectGateMessage,
   guessContentType
 } from '../src/http/handlers.js'
 
-// Local type to avoid importing inbox.ts (which pulls in bare-fs)
+// Local types to avoid importing bare-fs modules
+interface GatePayment {
+  method: string
+  amount: number
+  currency: string
+  invoiceId: string
+}
+
+interface GateEntry {
+  id: string
+  file: string
+  from: string
+  to: string
+  subject: string
+  receivedAt: number
+  contentType?: string
+  messageId?: string
+  senderEmail: string
+  payment: GatePayment
+  status: 'pending' | 'accepted' | 'rejected'
+}
+
 interface InboxEntry {
   id: string
   file: string
@@ -69,6 +97,21 @@ function makeEntry(id: string, overrides: Partial<InboxEntry> = {}): InboxEntry 
 }
 
 let testMediaDir: string
+
+function makeGateEntry(id: string, overrides: Partial<GateEntry> = {}): GateEntry {
+  return {
+    id,
+    file: `123-${id}.eml`,
+    from: 'sender@example.com',
+    to: 'recipient@quincemail.com',
+    subject: 'Gate Test',
+    receivedAt: 1700000000000,
+    senderEmail: 'sender@example.com',
+    payment: { method: 'lightning', amount: 100, currency: 'sats', invoiceId: `inv-${id}` },
+    status: 'pending',
+    ...overrides
+  }
+}
 
 function makeContext(overrides: Partial<HttpContext> = {}): HttpContext {
   const messages = [
@@ -123,6 +166,25 @@ function makeContext(overrides: Partial<HttpContext> = {}): HttpContext {
     acceptIntroduction: (_pubkey: string) => null,
     rejectIntroduction: (_pubkey: string) => null,
     signIntroduction: (_introduced: Record<string, unknown>) => 'a'.repeat(128),
+    addPeerToConfig: (_alias: string, _pubkey: string) => ({ success: true }),
+    listGateMessages: () => [
+      makeGateEntry('gate-1', { subject: 'Promo', status: 'pending' }),
+      makeGateEntry('gate-2', { subject: 'Invoice', status: 'accepted', senderEmail: 'bank@example.com' }),
+      makeGateEntry('gate-3', { subject: 'Spam', status: 'rejected' })
+    ],
+    getGateMessage: (id: string) => {
+      const all = [
+        makeGateEntry('gate-1', { subject: 'Promo', status: 'pending' }),
+        makeGateEntry('gate-2', { subject: 'Invoice', status: 'accepted', senderEmail: 'bank@example.com' }),
+        makeGateEntry('gate-3', { subject: 'Spam', status: 'rejected' })
+      ]
+      return all.find(e => e.id === id) ?? null
+    },
+    getGateMessageContent: (entry: GateEntry) => `From: ${entry.from}\r\nSubject: ${entry.subject}\r\n\r\nBody of ${entry.id}`,
+    deleteGateMessage: (_entry: GateEntry) => {},
+    updateGateMessageStatus: (_id: string, _status: string) => null,
+    storeMessage: (_id: string, _mime: string, _senderPubkey: string, _signatureValid: boolean) => makeEntry(_id),
+    addWhitelistRule: (_type: string, _value: string) => ({ id: 'wl-1', type: _type as any, value: _value, createdAt: Date.now() }),
     ...overrides
   }
 }
@@ -630,5 +692,276 @@ describe('handleSendIntroduction', () => {
     expect(data.introduced.alias).toBe('carol')
     expect(sentIntro).not.toBeNull()
     expect(sentIntro.type).toBe('INTRODUCTION')
+  })
+})
+
+// --- M15: Add Peer ---
+
+describe('handleAddPeer', () => {
+  test('adds peer successfully', () => {
+    let addedAlias = ''
+    let addedPubkey = ''
+    const ctx = makeContext({
+      addPeerToConfig: (alias: string, pubkey: string) => {
+        addedAlias = alias
+        addedPubkey = pubkey
+        return { success: true }
+      }
+    })
+    const req = makeRequest({
+      body: JSON.stringify({ alias: 'carol', pubkey: 'c'.repeat(64) })
+    })
+    const res = handleAddPeer(req, {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(res.status).toBe(200)
+    expect(data.added).toBe(true)
+    expect(data.alias).toBe('carol')
+    expect(data.pubkey).toBe('c'.repeat(64))
+    expect(addedAlias).toBe('carol')
+    expect(addedPubkey).toBe('c'.repeat(64))
+  })
+
+  test('returns 409 for duplicate alias', () => {
+    const ctx = makeContext()
+    const req = makeRequest({
+      body: JSON.stringify({ alias: 'alice', pubkey: 'c'.repeat(64) })
+    })
+    const res = handleAddPeer(req, {}, ctx)
+    expect(res.status).toBe(409)
+  })
+
+  test('returns 400 for invalid pubkey', () => {
+    const ctx = makeContext()
+    const req = makeRequest({
+      body: JSON.stringify({ alias: 'carol', pubkey: 'not-valid' })
+    })
+    const res = handleAddPeer(req, {}, ctx)
+    expect(res.status).toBe(400)
+  })
+
+  test('returns 400 for missing fields', () => {
+    const ctx = makeContext()
+    const req = makeRequest({ body: JSON.stringify({}) })
+    const res = handleAddPeer(req, {}, ctx)
+    expect(res.status).toBe(400)
+  })
+
+  test('returns 400 for invalid JSON', () => {
+    const ctx = makeContext()
+    const req = makeRequest({ body: 'not json' })
+    const res = handleAddPeer(req, {}, ctx)
+    expect(res.status).toBe(400)
+  })
+
+  test('returns 400 for invalid alias', () => {
+    const ctx = makeContext()
+    const req = makeRequest({
+      body: JSON.stringify({ alias: 'bad alias!', pubkey: 'c'.repeat(64) })
+    })
+    const res = handleAddPeer(req, {}, ctx)
+    expect(res.status).toBe(400)
+  })
+})
+
+// --- Gate inbox ---
+
+describe('handleListGateMessages', () => {
+  test('returns all gate messages', () => {
+    const ctx = makeContext()
+    const res = handleListGateMessages(makeRequest(), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.messages).toHaveLength(3)
+    expect(data.total).toBe(3)
+  })
+
+  test('filters by status=pending', () => {
+    const ctx = makeContext()
+    const res = handleListGateMessages(makeRequest({ query: { status: 'pending' } }), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.messages).toHaveLength(1)
+    expect(data.messages[0].id).toBe('gate-1')
+  })
+
+  test('filters by status=accepted', () => {
+    const ctx = makeContext()
+    const res = handleListGateMessages(makeRequest({ query: { status: 'accepted' } }), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.messages).toHaveLength(1)
+    expect(data.messages[0].id).toBe('gate-2')
+  })
+
+  test('filters by from (senderEmail)', () => {
+    const ctx = makeContext()
+    const res = handleListGateMessages(makeRequest({ query: { from: 'bank@example.com' } }), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.messages).toHaveLength(1)
+    expect(data.messages[0].id).toBe('gate-2')
+  })
+
+  test('filters by subject', () => {
+    const ctx = makeContext()
+    const res = handleListGateMessages(makeRequest({ query: { subject: 'promo' } }), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.messages).toHaveLength(1)
+    expect(data.messages[0].id).toBe('gate-1')
+  })
+
+  test('filters by q (full-text)', () => {
+    const ctx = makeContext()
+    const res = handleListGateMessages(makeRequest({ query: { q: 'invoice' } }), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.messages).toHaveLength(1)
+    expect(data.messages[0].id).toBe('gate-2')
+  })
+
+  test('pagination with offset and limit', () => {
+    const ctx = makeContext()
+    const res = handleListGateMessages(makeRequest({ query: { offset: '1', limit: '1' } }), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.messages).toHaveLength(1)
+    expect(data.messages[0].id).toBe('gate-2')
+    expect(data.total).toBe(3)
+    expect(data.offset).toBe(1)
+    expect(data.limit).toBe(1)
+  })
+
+  test('includes payment field in list response', () => {
+    const ctx = makeContext()
+    const res = handleListGateMessages(makeRequest(), {}, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.messages[0].payment).toBeDefined()
+    expect(data.messages[0].payment.method).toBe('lightning')
+  })
+})
+
+describe('handleGetGateMessage', () => {
+  test('returns gate message with body', () => {
+    const ctx = makeContext()
+    const res = handleGetGateMessage(makeRequest(), { id: 'gate-1' }, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.id).toBe('gate-1')
+    expect(data.body).toContain('Body of gate-1')
+    expect(data.payment).toBeDefined()
+    expect(data.status).toBe('pending')
+  })
+
+  test('returns 404 for unknown id', () => {
+    const ctx = makeContext()
+    const res = handleGetGateMessage(makeRequest(), { id: 'nonexistent' }, ctx)
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('handleGetGateRawMessage', () => {
+  test('returns raw .eml with correct content-type', () => {
+    const ctx = makeContext()
+    const res = handleGetGateRawMessage(makeRequest(), { id: 'gate-1' }, ctx)
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toBe('message/rfc822')
+    expect(res.body).toContain('Subject: Promo')
+  })
+
+  test('returns 404 for unknown id', () => {
+    const ctx = makeContext()
+    const res = handleGetGateRawMessage(makeRequest(), { id: 'nonexistent' }, ctx)
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('handleDeleteGateMessage', () => {
+  test('deletes and returns confirmation', () => {
+    let deletedId = ''
+    const ctx = makeContext({
+      deleteGateMessage: (entry: GateEntry) => { deletedId = entry.id }
+    })
+    const res = handleDeleteGateMessage(makeRequest(), { id: 'gate-1' }, ctx)
+    const data = JSON.parse(res.body)
+    expect(data.deleted).toBe(true)
+    expect(data.id).toBe('gate-1')
+    expect(deletedId).toBe('gate-1')
+  })
+
+  test('returns 404 for unknown id', () => {
+    const ctx = makeContext()
+    const res = handleDeleteGateMessage(makeRequest(), { id: 'nonexistent' }, ctx)
+    expect(res.status).toBe(404)
+  })
+})
+
+// --- Gate accept/reject ---
+
+describe('handleAcceptGateMessage', () => {
+  test('accepts pending message: status updated, sender whitelisted, message stored', () => {
+    let updatedId = ''
+    let updatedStatus = ''
+    let storedId = ''
+    let storedPubkey = ''
+    let whitelistedValue = ''
+    const ctx = makeContext({
+      updateGateMessageStatus: (id: string, status: any) => {
+        updatedId = id
+        updatedStatus = status
+        return makeGateEntry(id, { status })
+      },
+      storeMessage: (id: string, _mime: string, senderPubkey: string, _valid: boolean) => {
+        storedId = id
+        storedPubkey = senderPubkey
+        return makeEntry(id)
+      },
+      addWhitelistRule: (_type: string, value: string) => {
+        whitelistedValue = value
+        return { id: 'wl-1', type: _type as any, value, createdAt: Date.now() }
+      }
+    })
+    const res = handleAcceptGateMessage(makeRequest({ method: 'POST' }), { id: 'gate-1' }, ctx)
+    const data = JSON.parse(res.body)
+    expect(res.status).toBe(200)
+    expect(data.accepted).toBe(true)
+    expect(data.id).toBe('gate-1')
+    expect(data.senderWhitelisted).toBe(true)
+    expect(updatedId).toBe('gate-1')
+    expect(updatedStatus).toBe('accepted')
+    expect(storedId).toBe('gate-1')
+    expect(storedPubkey).toBe('legacy-gateway')
+    expect(whitelistedValue).toBe('sender@example.com')
+  })
+
+  test('returns 404 for unknown id', () => {
+    const ctx = makeContext()
+    const res = handleAcceptGateMessage(makeRequest({ method: 'POST' }), { id: 'nonexistent' }, ctx)
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('handleRejectGateMessage', () => {
+  test('rejects message: status updated, sender NOT whitelisted', () => {
+    let updatedId = ''
+    let updatedStatus = ''
+    let whitelistCalled = false
+    const ctx = makeContext({
+      updateGateMessageStatus: (id: string, status: any) => {
+        updatedId = id
+        updatedStatus = status
+        return makeGateEntry(id, { status })
+      },
+      addWhitelistRule: (_type: string, _value: string) => {
+        whitelistCalled = true
+        return { id: 'wl-1', type: _type as any, value: _value, createdAt: Date.now() }
+      }
+    })
+    const res = handleRejectGateMessage(makeRequest({ method: 'POST' }), { id: 'gate-1' }, ctx)
+    const data = JSON.parse(res.body)
+    expect(res.status).toBe(200)
+    expect(data.rejected).toBe(true)
+    expect(data.id).toBe('gate-1')
+    expect(updatedId).toBe('gate-1')
+    expect(updatedStatus).toBe('rejected')
+    expect(whitelistCalled).toBe(false)
+  })
+
+  test('returns 404 for unknown id', () => {
+    const ctx = makeContext()
+    const res = handleRejectGateMessage(makeRequest({ method: 'POST' }), { id: 'nonexistent' }, ctx)
+    expect(res.status).toBe(404)
   })
 })
